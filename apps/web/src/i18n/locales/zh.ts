@@ -267,6 +267,7 @@ const zh = {
     name: 'Sigmo',
   },
   errors: {
+    internet_default_route_conflict: '已有其他连接占用默认路由。',
     transfer_request_expired: '此转移请求已过期或已处理。',
     authentication_failed: '登录未通过验证，请重新登录。',
     create_session_failed: '无法创建会话，请重试。',
@@ -1277,7 +1278,7 @@ const zh = {
       internetAuthDefault: '默认',
       internetAuthNone: '无认证',
       internetDefaultRouteLabel: '默认出口网络',
-      internetDefaultRouteDescription: '把这个模块作为系统默认上网出口。',
+      internetDefaultRouteDescription: '使用此模块作为系统默认上网出口。',
       internetProxyLabel: '代理服务',
       internetProxyDescription: '连接后暴露 HTTP 和 SOCKS5 代理。',
       internetAlwaysOnLabel: 'Always On',

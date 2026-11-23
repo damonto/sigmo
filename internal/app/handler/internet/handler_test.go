@@ -79,6 +79,12 @@ func TestInternetError(t *testing.T) {
 			wantBody:   "internet_connection_unsupported_ip_method",
 		},
 		{
+			name:       "default route conflict",
+			err:        internetcore.ErrDefaultRouteConflict,
+			wantStatus: http.StatusConflict,
+			wantBody:   "internet_default_route_conflict",
+		},
+		{
 			name:       "internal connect error",
 			err:        errors.New("permission denied"),
 			wantStatus: http.StatusInternalServerError,

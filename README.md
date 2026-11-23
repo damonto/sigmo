@@ -122,6 +122,12 @@ Sigmo stores Internet Always On settings, modem network Mode/Bands preferences,
 and manual network registration preferences in SQLite so they can be restored
 after modem reloads, program restarts, and system reboots.
 
+Selecting **Default route** makes the cellular link the preferred route for its
+available IP families. Sigmo can also use the carrier's DNS for domains without a
+more specific rule when the host uses the `systemd-resolved` stub and Sigmo can
+access the host system bus. Otherwise the host continues to select its DNS servers.
+See the [default route and DNS guide](internal/pkg/internet/DEFAULT_ROUTE.md).
+
 ## ⚙️ Configuration Reference
 
 Startup configuration is provided through flags:

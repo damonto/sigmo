@@ -343,7 +343,9 @@ func (c *Connector) connectQMAPSessionLocked(ctx context.Context, modem *mmodem.
 		)
 	}
 	defer c.lockRoutes()()
-	tracked, err := c.qmapOperationSet().configureNetwork(ctx, c.persistence, modem.EquipmentIdentifier, prefs, combined, c.routeOperationSet())
+	networkPrefs := prefs
+	networkPrefs.DefaultRoute = false
+	tracked, err := c.qmapOperationSet().configureNetwork(ctx, c.persistence, modem.EquipmentIdentifier, networkPrefs, combined, c.routeOperationSet())
 	if err != nil {
 		return nil, errors.Join(
 			fmt.Errorf("configure QMAP mux %d: %w", internetQMAPMuxID, err),
@@ -354,13 +356,13 @@ func (c *Connector) connectQMAPSessionLocked(ctx context.Context, modem *mmodem.
 	tracked.modemGeneration = modem.Generation()
 	tracked.profileID = profileID
 	connection.tracked = tracked
-	if err := c.syncDefaultRouteTakeover(ctx, modem.EquipmentIdentifier, &connection.tracked); err != nil {
-		return nil, errors.Join(
-			fmt.Errorf("sync QMAP default route takeover: %w", err),
-			connection.cleanup(ctx, c),
-			connection.close(),
-			c.removeQMAPMuxes(modem, internetQMAPMuxID),
-		)
+	if prefs.DefaultRoute {
+		connection.tracked, err = c.updateTrackedDefaultRoute(ctx, modem.EquipmentIdentifier, tracked, true)
+		if err != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), connectionCleanupTimeout)
+			defer cancel()
+			return nil, errors.Join(err, connection.cleanup(cleanupCtx, c), connection.close(), c.removeQMAPMuxes(modem, internetQMAPMuxID))
+		}
 	}
 	if familyErrors != nil {
 		slog.Warn("QMAP Internet connected with unavailable IP family", "imei", modem.EquipmentIdentifier, "error", familyErrors)
@@ -406,6 +408,9 @@ func (c *Connector) connectQMAPSessionLocked(ctx context.Context, modem *mmodem.
 		c.preferences[modem.EquipmentIdentifier] = prefs
 	}
 	c.mu.Unlock()
+	if prefs.DefaultRoute {
+		c.configureDefaultRouteDNS(ctx, modem.EquipmentIdentifier, connection.tracked)
+	}
 	return c.qmapConnectionResponse(modem.EquipmentIdentifier, connection), nil
 }
 
@@ -489,6 +494,8 @@ func (c *qmapConnection) close() error {
 }
 
 func (c *qmapConnection) cleanup(ctx context.Context, connector *Connector) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), connectionCleanupTimeout)
+	defer cancel()
 	tracked := c.tracked
 	c.tracked = trackedConnection{}
 	if strings.TrimSpace(tracked.interfaceName) == "" {

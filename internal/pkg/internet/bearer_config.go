@@ -512,7 +512,7 @@ func recoverTrackedConnection(ctx context.Context, stateStore connectionStateSto
 	if err != nil {
 		return trackedConnection{}, 0, false, fmt.Errorf("load default route state: %w", err)
 	}
-	if prefs.DefaultRoute && !routeStateFound {
+	if prefs.DefaultRoute && !routeStateFound && !routeOps.skipRecoveryTakeover {
 		slog.Debug("recovering connected bearer default route takeover", "imei", modemID, "interface", interfaceName)
 		routeChanges, err = takeoverDefaultRoutesWithStore(ctx, stateStore, modemID, interfaceName, routes, routeOps)
 		if err != nil {

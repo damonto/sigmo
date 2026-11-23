@@ -90,6 +90,7 @@
   "internet_auth_invalid_config": "Internet Auth Invalid Config",
   "internet_connection_not_connected": "Internet Connection Not Connected",
   "internet_connection_unsupported_ip_method": "Internet Connection Unsupported IP Method",
+  "internet_default_route_conflict": "Internet Default Route Conflict",
   "internet_ip_type_invalid_config": "Internet IP Type Invalid Config",
   "internet_operation_in_progress": "Internet Operation In Progress",
   "internet_preferences_invalid_request": "Internet Preferences Invalid Request",

@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -19,15 +22,21 @@ const (
 	secondaryRouteMetric = 1000
 )
 
+// ErrDefaultRouteConflict means another connection owns a competing route.
+var ErrDefaultRouteConflict = errors.New("system default route conflicts with another connection")
+
 type defaultRouteChange struct {
 	Original    netlink.DefaultRoute
 	Replacement netlink.DefaultRoute
 }
 
 type defaultRouteOps struct {
-	defaultRoutes      func() ([]netlink.DefaultRoute, error)
-	addDefaultRoute    func(netlink.DefaultRoute) error
-	deleteDefaultRoute func(netlink.DefaultRoute) error
+	linkID               func(string) (linkIdentity, error)
+	defaultRoutes        func() ([]netlink.DefaultRoute, error)
+	addDefaultRoute      func(netlink.DefaultRoute) error
+	deleteDefaultRoute   func(netlink.DefaultRoute) error
+	checkTakeover        func([]netlink.DefaultRoute, []netlink.DefaultRoute) error
+	skipRecoveryTakeover bool
 }
 
 type routeStateRestoreTarget struct {
@@ -37,6 +46,7 @@ type routeStateRestoreTarget struct {
 
 func defaultRouteOperations() defaultRouteOps {
 	return defaultRouteOps{
+		linkID:             readLinkIdentity,
 		defaultRoutes:      netlink.DefaultRoutes,
 		addDefaultRoute:    netlink.AddDefaultRoute,
 		deleteDefaultRoute: netlink.DeleteDefaultRoute,
@@ -45,6 +55,9 @@ func defaultRouteOperations() defaultRouteOps {
 
 func (ops defaultRouteOps) withDefaults() defaultRouteOps {
 	defaults := defaultRouteOperations()
+	if ops.linkID == nil {
+		ops.linkID = defaults.linkID
+	}
 	if ops.defaultRoutes == nil {
 		ops.defaultRoutes = defaults.defaultRoutes
 	}
@@ -57,10 +70,46 @@ func (ops defaultRouteOps) withDefaults() defaultRouteOps {
 	return ops
 }
 
+type linkIdentity struct {
+	Boot  string `json:"boot"`
+	Index int32  `json:"index"`
+	Path  string `json:"path"`
+}
+
+func readLinkIdentity(name string) (linkIdentity, error) {
+	if name == "" || name != filepath.Base(name) || name == "." || name == ".." {
+		return linkIdentity{}, errors.New("invalid network interface name")
+	}
+	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return linkIdentity{}, err
+	}
+	id := linkIdentity{Boot: strings.TrimSpace(string(boot))}
+	path, err := filepath.EvalSymlinks(filepath.Join("/sys/class/net", name))
+	if err != nil {
+		return id, err
+	}
+	raw, err := os.ReadFile(filepath.Join(path, "ifindex"))
+	if err != nil {
+		return id, err
+	}
+	index, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 32)
+	if err != nil || index <= 0 {
+		return id, fmt.Errorf("invalid interface index for %s", name)
+	}
+	id.Index, id.Path = int32(index), path
+	return id, nil
+}
+
 func takeoverDefaultRoutesWithStore(ctx context.Context, state connectionStateStore, modemID string, interfaceName string, preferred []netlink.DefaultRoute, ops defaultRouteOps) ([]defaultRouteChange, error) {
 	current, err := ops.defaultRoutes()
 	if err != nil {
 		return nil, err
+	}
+	if ops.checkTakeover != nil {
+		if err := ops.checkTakeover(current, preferred); err != nil {
+			return nil, err
+		}
 	}
 
 	changes := defaultRouteChanges(current, preferred)
@@ -329,4 +378,30 @@ func routeMetric(defaultRoute bool) int {
 		return defaultRouteMetric
 	}
 	return secondaryRouteMetric
+}
+
+func (c *Connector) checkRouteTakeover(current, preferred []netlink.DefaultRoute) error {
+	c.mu.Lock()
+	owners := c.routeOwnersLocked()
+	c.mu.Unlock()
+	for _, change := range defaultRouteChanges(current, preferred) {
+		if _, _, ok := routeChangeOwner(owners, change); !ok {
+			return fmt.Errorf("%w: %s has a competing default route with metric %d", ErrDefaultRouteConflict, change.Original.Interface, change.Original.Metric)
+		}
+	}
+	return nil
+}
+
+func routePreferred(route netlink.DefaultRoute, current []netlink.DefaultRoute) bool {
+	found := false
+	for _, other := range current {
+		if other.Family != route.Family || other.Metric > route.Metric {
+			continue
+		}
+		if !sameDefaultRoute(other, route) {
+			return false
+		}
+		found = true
+	}
+	return found
 }

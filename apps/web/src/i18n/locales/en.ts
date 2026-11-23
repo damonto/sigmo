@@ -279,6 +279,7 @@ const en = {
     name: 'Sigmo',
   },
   errors: {
+    internet_default_route_conflict: 'Another connection already controls the default route.',
     transfer_request_expired: 'This transfer request expired or was already answered.',
     authentication_failed: 'Sign-in was not accepted. Start again.',
     create_session_failed: 'Could not create a session. Try again.',
@@ -1319,7 +1320,7 @@ const en = {
       internetAuthDefault: 'Default',
       internetAuthNone: 'No authentication',
       internetDefaultRouteLabel: 'Default route',
-      internetDefaultRouteDescription: 'Use this modem as the system default internet route.',
+      internetDefaultRouteDescription: 'Use this modem as the system default route.',
       internetProxyLabel: 'Proxy service',
       internetProxyDescription: 'Expose HTTP and SOCKS5 proxies after connecting.',
       internetAlwaysOnLabel: 'Always On',

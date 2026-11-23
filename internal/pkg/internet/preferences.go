@@ -70,7 +70,7 @@ func (c *Connector) UpdatePreferences(ctx context.Context, modem *mmodem.Modem, 
 	return current, nil
 }
 
-func (c *Connector) updateTrackedPreferences(ctx context.Context, modem internetModem, tracked trackedConnection, next ConnectionPreferences) (trackedConnection, error) {
+func (c *Connector) updateTrackedPreferences(ctx context.Context, modem internetModem, tracked trackedConnection, next ConnectionPreferences) (_ trackedConnection, resultErr error) {
 	previous := tracked.prefs
 	wanted := previous
 	wanted.DefaultRoute = next.DefaultRoute
@@ -80,35 +80,48 @@ func (c *Connector) updateTrackedPreferences(ctx context.Context, modem internet
 		return tracked, ErrProfileIDRequired
 	}
 
-	updated := cloneTrackedConnection(tracked)
-	var err error
-	if previous.DefaultRoute != wanted.DefaultRoute {
-		updated, err = c.updateTrackedDefaultRoute(ctx, modem.id(), updated, wanted.DefaultRoute)
-		if err != nil {
-			return tracked, fmt.Errorf("update default route preference: %w", err)
+	modemID, profileID := modem.id(), modem.profileID()
+	var proxyChanged, alwaysOnChanged bool
+	defer func() {
+		if resultErr == nil || !proxyChanged && !alwaysOnChanged {
+			return
 		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), connectionCleanupTimeout)
+		defer cancel()
+		if alwaysOnChanged {
+			resultErr = errors.Join(resultErr, c.syncAlwaysOnState(cleanupCtx, profileID, previous))
+		}
+		if proxyChanged {
+			resultErr = errors.Join(resultErr, c.applyProxyPreference(cleanupCtx, modemID, tracked.interfaceName, tracked.dns, previous.ProxyEnabled))
+		}
+	}()
+	if previous.ProxyEnabled != wanted.ProxyEnabled {
+		if err := c.applyProxyPreference(ctx, modemID, tracked.interfaceName, tracked.dns, wanted.ProxyEnabled); err != nil {
+			return tracked, fmt.Errorf("update proxy preference: %w", err)
+		}
+		proxyChanged = true
+	}
+	if previous.AlwaysOn != wanted.AlwaysOn || wanted.AlwaysOn && previous != wanted {
+		if err := c.syncAlwaysOnState(ctx, profileID, wanted); err != nil {
+			return tracked, fmt.Errorf("update always on preference: %w", err)
+		}
+		alwaysOnChanged = true
 	}
 
-	proxyChanged := previous.ProxyEnabled != wanted.ProxyEnabled
-	if proxyChanged {
-		if err := c.applyProxyPreference(ctx, modem.id(), updated.interfaceName, updated.dns, wanted.ProxyEnabled); err != nil {
-			rollbackErr := c.rollbackTrackedDefaultRoute(ctx, modem.id(), updated, previous.DefaultRoute)
-			return tracked, errors.Join(fmt.Errorf("update proxy preference: %w", err), rollbackErr)
-		}
+	// Apply the host-wide change last so an unrelated preference failure
+	// cannot force a second default route and DNS handoff.
+	updated, err := c.updateTrackedDefaultRoute(ctx, modemID, tracked, wanted.DefaultRoute)
+	if err != nil {
+		return tracked, fmt.Errorf("update default route preference: %w", err)
 	}
-
-	if previous.AlwaysOn != wanted.AlwaysOn {
-		if err := c.syncAlwaysOnState(ctx, modem.profileID(), wanted); err != nil {
-			var rollbackErr error
-			if proxyChanged {
-				rollbackErr = errors.Join(rollbackErr, c.applyProxyPreference(ctx, modem.id(), updated.interfaceName, tracked.dns, previous.ProxyEnabled))
-			}
-			rollbackErr = errors.Join(rollbackErr, c.rollbackTrackedDefaultRoute(ctx, modem.id(), updated, previous.DefaultRoute))
-			return tracked, errors.Join(fmt.Errorf("update always on preference: %w", err), rollbackErr)
-		}
-	}
-
 	updated.prefs = wanted
+	if previous.DefaultRoute != wanted.DefaultRoute {
+		if wanted.DefaultRoute {
+			c.configureDefaultRouteDNS(ctx, modemID, updated)
+		} else {
+			c.releaseSystemDNS(ctx, tracked.interfaceName)
+		}
+	}
 	return updated, nil
 }
 
@@ -131,29 +144,50 @@ func (c *Connector) updateTrackedDefaultRoute(ctx context.Context, modemID strin
 	if tracked.prefs.DefaultRoute == enabled {
 		return tracked, nil
 	}
-	previous := cloneTrackedConnection(tracked)
-	routeTemplate := slices.Clone(tracked.routes)
-	if err := c.removeTrackedRoutes(ctx, tracked); err != nil {
-		_, rollbackErr := c.installTrackedRoutes(ctx, modemID, previous, routeTemplate, previous.prefs.DefaultRoute)
-		return previous, errors.Join(err, rollbackErr)
+	if err := ctx.Err(); err != nil {
+		return tracked, err
 	}
-	updated, err := c.installTrackedRoutes(ctx, modemID, tracked, routeTemplate, enabled)
+	var pending *routePromotion
+	if enabled {
+		if len(tracked.routes) == 0 {
+			return tracked, fmt.Errorf("no available default route: %w", ErrUnsupportedIPMethod)
+		}
+		var err error
+		pending, err = c.beginRoutePromotion(ctx, modemID, tracked)
+		if err != nil {
+			return tracked, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		if pending != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), connectionCleanupTimeout)
+			defer cancel()
+			err = errors.Join(err, c.finishRoutePromotion(cleanupCtx))
+		}
+		return tracked, err
+	}
+	var updated trackedConnection
+	err := c.removeTrackedRoutes(ctx, tracked)
+	if err == nil {
+		updated, err = c.installTrackedRoutes(ctx, modemID, tracked, tracked.routes, enabled)
+	}
+	if err == nil && pending != nil {
+		err = c.finishRoutePromotion(ctx)
+	}
 	if err == nil {
 		return updated, nil
 	}
-	_, rollbackErr := c.installTrackedRoutes(ctx, modemID, previous, routeTemplate, previous.prefs.DefaultRoute)
-	return previous, errors.Join(err, rollbackErr)
-}
-
-func (c *Connector) rollbackTrackedDefaultRoute(ctx context.Context, modemID string, tracked trackedConnection, enabled bool) error {
-	if tracked.prefs.DefaultRoute == enabled {
-		return nil
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), connectionCleanupTimeout)
+	defer cancel()
+	if pending != nil {
+		rollbackErr := c.rollbackRoutePromotion(cleanupCtx, *pending)
+		if rollbackErr == nil {
+			rollbackErr = c.finishRoutePromotion(cleanupCtx)
+		}
+		return tracked, errors.Join(err, rollbackErr)
 	}
-	_, err := c.updateTrackedDefaultRoute(ctx, modemID, tracked, enabled)
-	if err != nil {
-		return fmt.Errorf("rollback default route preference: %w", err)
-	}
-	return nil
+	_, rollbackErr := c.installTrackedRoutes(cleanupCtx, modemID, tracked, tracked.routes, tracked.prefs.DefaultRoute)
+	return tracked, errors.Join(err, rollbackErr)
 }
 
 func (c *Connector) removeTrackedRoutes(ctx context.Context, tracked trackedConnection) error {
@@ -189,6 +223,7 @@ func (c *Connector) installTrackedRoutes(ctx context.Context, modemID string, tr
 
 	var changes []defaultRouteChange
 	if enabled {
+		routeOps.checkTakeover = c.checkRouteTakeover
 		if err := restoreStaleDefaultRouteStatesWithStore(ctx, c.persistence, routeStateRestoreTarget{
 			modemID:        modemID,
 			interfaceNames: []string{tracked.interfaceName},

@@ -740,7 +740,7 @@
 "connection.disconnectToEditAPN" = "断开互联网连接后可修改这些设置。";
 "connection.invalidAPN" = "请检查 APN 设置。APN、用户名和密码均不能超过 100 个字符，并请选择支持的 IP 类型和认证方式。";
 "connection.defaultRoute" = "默认路由";
-"connection.defaultRouteHint" = "将此设备用作 Sigmo 的默认上网出口。";
+"connection.defaultRouteHint" = "使用此设备作为 Sigmo 主机的默认上网出口。";
 "connection.proxy" = "代理服务";
 "connection.proxyHint" = "通过此连接提供 HTTP 和 SOCKS5 代理。";
 "connection.alwaysOn" = "保持连接";
@@ -848,6 +848,7 @@
 "apiError.connect_internet_failed" = "无法确认连接结果，请刷新状态后重试。";
 "apiError.disconnect_internet_failed" = "无法确认断开结果，请刷新状态。";
 "apiError.internet_connection_unsupported_ip_method" = "此设备不支持该连接的 IP 配置。";
+"apiError.internet_default_route_conflict" = "已有其他连接占用默认路由。";
 "apiError.internet_proxy_invalid_config" = "请检查 Sigmo 设置中的代理凭据。";
 "apiError.internet_proxy_start_failed" = "无法启动代理服务。";
 "apiError.internet_auth_invalid_config" = "此设备不支持所选 APN 认证方式。";

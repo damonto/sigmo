@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -690,12 +691,11 @@ func cleanupQualcomm410Applied(ctx context.Context, state connectionStateStore, 
 		return err
 	}
 	var result error
-	for i := len(tracked.routes) - 1; i >= 0; i-- {
-		result = errors.Join(result, ops.deleteDefaultRoute(tracked.routes[i]))
+	for _, v := range slices.Backward(tracked.routes) {
+		result = errors.Join(result, ops.deleteDefaultRoute(v))
 	}
 	result = errors.Join(result, cleanupDefaultRouteChangesWithStore(ctx, state, tracked.interfaceName, tracked.routeChanges, ops.routeOps()))
-	for i := len(tracked.addresses) - 1; i >= 0; i-- {
-		prefix := tracked.addresses[i]
+	for _, prefix := range slices.Backward(tracked.addresses) {
 		result = errors.Join(result, ops.deletePointToPointAddress(tracked.interfaceName, prefix.Addr(), tracked.peers[prefix]))
 	}
 	if tracked.qualcomm410InterfaceState.restoreIPv6 {
@@ -717,10 +717,12 @@ func (c *Connector) recoverConnectedBearer(ctx context.Context, modem internetMo
 		ok      bool
 		err     error
 	)
+	ops := c.routeOperationSet()
+	ops.skipRecoveryTakeover = c.systemDNS != nil
 	if !c.qualcomm410SelectedFor(modem.id()) {
-		tracked, metric, ok, err = recoverTrackedConnection(ctx, c.persistence, modem.id(), bearer, fallback, c.routeOperationSet())
+		tracked, metric, ok, err = recoverTrackedConnection(ctx, c.persistence, modem.id(), bearer, fallback, ops)
 	} else {
-		tracked, metric, ok, err = recoverQualcomm410TrackedConnection(ctx, c.persistence, modem.id(), bearer, fallback, c.routeOperationSet())
+		tracked, metric, ok, err = recoverQualcomm410TrackedConnection(ctx, c.persistence, modem.id(), bearer, fallback, ops)
 	}
 	if ok {
 		tracked.modemGeneration = modem.generation()
@@ -772,7 +774,7 @@ func recoverQualcomm410TrackedConnection(ctx context.Context, stateStore connect
 	if err != nil {
 		return trackedConnection{}, 0, false, fmt.Errorf("load default route state: %w", err)
 	}
-	if prefs.DefaultRoute && !routeStateFound {
+	if prefs.DefaultRoute && !routeStateFound && !routeOps.skipRecoveryTakeover {
 		routeChanges, err = takeoverDefaultRoutesWithStore(ctx, stateStore, modemID, interfaceName, routes, routeOps)
 		if err != nil {
 			return trackedConnection{}, 0, false, fmt.Errorf("take over recovered default route: %w", err)

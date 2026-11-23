@@ -227,6 +227,7 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 		internetConnector.RunAlwaysOn(ctx, registry)
 		return nil
 	})
+	startRunner("default route recovery", internetConnector.RunDefaultRouteRecovery)
 	startRunner("network preferences restore", func(ctx context.Context) error {
 		return modemtask.Run(ctx, registry, networkPreferences.Restore)
 	})

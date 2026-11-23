@@ -740,7 +740,7 @@
 "connection.disconnectToEditAPN" = "Disconnect Internet to edit these settings.";
 "connection.invalidAPN" = "Check the APN settings. APN, username, and password must each contain at most 100 characters; choose a supported IP type and authentication method.";
 "connection.defaultRoute" = "Default Route";
-"connection.defaultRouteHint" = "Use this device as the Sigmo’s default Internet connection.";
+"connection.defaultRouteHint" = "Use this device as the Sigmo host’s default Internet route.";
 "connection.proxy" = "Proxy Service";
 "connection.proxyHint" = "Provide HTTP and SOCKS5 proxies through this connection.";
 "connection.alwaysOn" = "Always On";
@@ -848,6 +848,7 @@
 "apiError.connect_internet_failed" = "The connection could not be confirmed. Refresh its status before trying again.";
 "apiError.disconnect_internet_failed" = "The disconnection could not be confirmed. Refresh its status.";
 "apiError.internet_connection_unsupported_ip_method" = "This device does not support the connection’s IP configuration.";
+"apiError.internet_default_route_conflict" = "Another connection already controls the default route.";
 "apiError.internet_proxy_invalid_config" = "Check the proxy credentials in the Sigmo settings.";
 "apiError.internet_proxy_start_failed" = "The proxy service could not be started.";
 "apiError.internet_auth_invalid_config" = "This device does not support the selected APN authentication.";

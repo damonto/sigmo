@@ -126,6 +126,9 @@ func internetError(c *echo.Context, err error, internalErrorCode string) error {
 	if errors.Is(err, internetcore.ErrNotConnected) {
 		return httpapi.Error(c, http.StatusConflict, "internet_connection_not_connected", internetcore.ErrNotConnected.Error())
 	}
+	if errors.Is(err, internetcore.ErrDefaultRouteConflict) {
+		return httpapi.Error(c, http.StatusConflict, "internet_default_route_conflict", err.Error())
+	}
 	if errors.Is(err, internetcore.ErrUnsupportedIPMethod) {
 		return httpapi.UnprocessableEntity(c, "internet_connection_unsupported_ip_method", internetcore.ErrUnsupportedIPMethod)
 	}

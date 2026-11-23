@@ -79,6 +79,7 @@ type Connector struct {
 	persistence        connectionStateStore
 	networkPreferences *networkprefs.Store
 	routes             defaultRouteOps
+	systemDNS          systemDNSResolver
 	qmap               qmapOps
 	qmapConnections    map[string]*qmapConnection
 	qmapEnabled        map[string]bool
@@ -259,6 +260,7 @@ func NewConnector(cfg ConnectorConfig) (*Connector, error) {
 		persistence:        dbConnectionState{store: cfg.State},
 		networkPreferences: cfg.NetworkPreferences,
 		routes:             defaultRouteOperations(),
+		systemDNS:          resolvedDNS{},
 		qmap:               defaultQMAPOps(),
 		qualcomm410:        defaultQualcomm410Ops(),
 	}
@@ -295,7 +297,7 @@ func (c *Connector) UpdateProxyConfig(cfg ProxyConfig) error {
 }
 
 func (c *Connector) Recover(ctx context.Context, modems []*mmodem.Modem) error {
-	var result error
+	result := errors.Join(c.recoverDefaultRoutes(ctx), c.recoverSystemDNS(ctx))
 	for _, modem := range modems {
 		if modem == nil {
 			continue
@@ -488,6 +490,7 @@ func (c *Connector) recover(ctx context.Context, modem internetModem) error {
 	if err := c.syncProxyPreference(ctx, modemID, tracked.interfaceName, tracked.dns, tracked.prefs); err != nil {
 		return err
 	}
+	c.adoptSystemDNS(ctx, modemID, tracked)
 	c.setConnectionAndPreference(modemID, tracked, tracked.prefs)
 	return nil
 }
@@ -567,8 +570,8 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 	prefs = bearerPreferences(ctx, bearer, prefs)
 
 	defer c.lockRoutes()()
-	tracked, err := c.configureConnectedBearer(ctx, modemID, bearer, prefs)
-	networkConfigured := err == nil
+	var tracked trackedConnection
+	networkConfigured := false
 	defer func() {
 		if resultErr == nil {
 			return
@@ -577,17 +580,30 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), connectionCleanupTimeout)
 		defer cancel()
 		if networkConfigured {
-			resultErr = errors.Join(resultErr, c.cleanupTracked(cleanupCtx, modemID, tracked))
+			cleanupErr := c.cleanupTracked(cleanupCtx, modemID, tracked)
+			if cleanupErr == nil {
+				cleanupErr = c.syncCleanedUpDefaultRouteState(cleanupCtx, tracked)
+			}
+			resultErr = errors.Join(resultErr, cleanupErr)
 		}
 		resultErr = errors.Join(resultErr, bearer.Disconnect(cleanupCtx))
 	}()
+	networkPrefs := prefs
+	networkPrefs.DefaultRoute = false
+	tracked, err = c.configureConnectedBearer(ctx, modemID, bearer, networkPrefs)
 	if err != nil {
 		return nil, err
 	}
+	networkConfigured = true
 	tracked.bearerPath = bearer.Path()
 	tracked.modemGeneration = modem.generation()
 	tracked.profileID = profileID
-	tracked.prefs = prefs
+	if prefs.DefaultRoute {
+		tracked, err = c.updateTrackedDefaultRoute(ctx, modemID, tracked, true)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	if err := c.syncProxyPreference(ctx, modemID, tracked.interfaceName, tracked.dns, prefs); err != nil {
 		return nil, err
@@ -607,9 +623,6 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 			return nil, fmt.Errorf("sync always on state: %w", err)
 		}
 	}
-	if err := c.syncDefaultRouteTakeover(ctx, modemID, &tracked); err != nil {
-		return nil, fmt.Errorf("sync default route takeover: %w", err)
-	}
 	if mode == connectTemporary {
 		c.mu.Lock()
 		c.connections[modemID] = tracked
@@ -618,6 +631,9 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 		c.setConnectionAndPreference(modemID, tracked, prefs)
 	}
 	c.completeQualcomm410ConnectLocked(modemID)
+	if prefs.DefaultRoute {
+		c.configureDefaultRouteDNS(ctx, modemID, tracked)
+	}
 
 	return connection, nil
 }
@@ -839,10 +855,16 @@ func (c *Connector) syncDefaultRouteRestore(ctx context.Context, changes []defau
 }
 
 func (c *Connector) syncCleanedUpDefaultRouteState(ctx context.Context, tracked trackedConnection) error {
+	var err error
 	if tracked.prefs.DefaultRoute {
-		return c.syncDefaultRouteRestore(ctx, tracked.routeChanges)
+		err = c.syncDefaultRouteRestore(ctx, tracked.routeChanges)
+	} else {
+		err = c.syncDefaultRouteRemoval(ctx, tracked)
 	}
-	return c.syncDefaultRouteRemoval(ctx, tracked)
+	if err == nil {
+		c.releaseSystemDNS(ctx, tracked.interfaceName)
+	}
+	return err
 }
 
 func (c *Connector) syncDefaultRouteRemoval(ctx context.Context, removed trackedConnection) error {
@@ -1252,7 +1274,11 @@ func (c *Connector) cleanupProxyForModem(ctx context.Context, modemID string) er
 func (c *Connector) cleanupStaleConnectionState(ctx context.Context, modemID string, interfaceNames ...string) error {
 	err := c.cleanupProxyInterfaces(ctx, modemID, interfaceNames)
 	err = errors.Join(err, c.cleanupProxyForModem(ctx, modemID))
-	err = errors.Join(err, restoreStaleDefaultRouteStatesWithStore(ctx, c.persistence, routeStateRestoreTarget{modemID: modemID, interfaceNames: interfaceNames}, c.routeOperationSet()))
+	routeErr := restoreStaleDefaultRouteStatesWithStore(ctx, c.persistence, routeStateRestoreTarget{modemID: modemID, interfaceNames: interfaceNames}, c.routeOperationSet())
+	if routeErr == nil {
+		c.releaseModemSystemDNS(ctx, modemID)
+	}
+	err = errors.Join(err, routeErr)
 	for _, interfaceName := range interfaceNames {
 		if strings.TrimSpace(interfaceName) == "" {
 			continue
