@@ -15,7 +15,7 @@ const threadID = computed(() =>
 
 <template>
   <main
-    class="grid gap-6 lg:h-(--modem-desktop-content-height) lg:min-h-0 lg:grid-cols-[15rem_minmax(0,1fr)] lg:overflow-hidden"
+    class="grid gap-6 lg:h-(--modem-desktop-content-height) lg:min-h-0 lg:grid-cols-(--communication-columns) lg:overflow-hidden"
     :class="
       threadID
         ? 'h-[calc(100dvh-6.5rem-env(safe-area-inset-bottom))] overflow-hidden'

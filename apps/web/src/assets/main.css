@@ -63,7 +63,8 @@
   --modem-desktop-content-padding-top: 1.5rem;
   --modem-desktop-content-padding-bottom: 2rem;
   --desktop-workspace-columns: clamp(14rem, 21vw, 17rem) minmax(0, 1fr);
-  --modem-communication-columns: minmax(15rem, 4fr) minmax(0, 11fr);
+  --communication-columns: 20rem minmax(0, 1fr);
+  --modem-communication-columns: minmax(20rem, 16fr) minmax(0, 29fr);
   --desktop-workspace-height: calc(
     100dvh - var(--modem-desktop-content-padding-top) - var(--modem-desktop-content-padding-bottom)
   );
