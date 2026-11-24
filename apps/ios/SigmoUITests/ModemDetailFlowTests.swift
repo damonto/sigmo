@@ -334,6 +334,41 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertEqual(app.staticTexts["seStorage-se-a"].value as? String, "64 KiB")
     }
 
+    func testOverviewGlassDoesNotShadeTheCardGutter() throws {
+        let app = launch("detail-traffic")
+        let network = app.descendants(matching: .any)["esimNetworkBar"].firstMatch
+        let traffic = app.descendants(matching: .any)["internetTrafficCard"].firstMatch
+        XCTAssertTrue(traffic.waitForExistence(timeout: 5))
+        XCTAssertTrue(network.exists)
+        let image = try XCTUnwrap(app.screenshot().image.cgImage)
+        let frame = app.frame
+        let scale = CGFloat(image.width) / frame.width
+
+        func red(at point: CGPoint) throws -> Int {
+            let x = ((point.x - frame.minX) * scale).rounded(.down)
+            let y = ((point.y - frame.minY) * scale).rounded(.down)
+            let sample = try XCTUnwrap(image.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)))
+            var pixel = [UInt8](repeating: 0, count: 4)
+            try pixel.withUnsafeMutableBytes { buffer in
+                let context = try XCTUnwrap(CGContext(
+                    data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+                ))
+                context.draw(sample, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            return Int(pixel[0])
+        }
+
+        for card in [network, traffic] {
+            let bounds = card.frame
+            // Sample either side of the list row's outer edge, outside the glass itself.
+            let nearEdge = try red(at: CGPoint(x: bounds.minX - 3, y: bounds.midY))
+            let gutter = try red(at: CGPoint(x: bounds.minX - 11, y: bounds.midY))
+            XCTAssertEqual(nearEdge, gutter, accuracy: 4, card.identifier)
+        }
+    }
+
     func testInternetTrafficCardShowsLiveRatesAndUsesSystemIconTint() throws {
         let app = launch("detail-traffic")
         let card = app.descendants(matching: .any)["internetTrafficCard"].firstMatch

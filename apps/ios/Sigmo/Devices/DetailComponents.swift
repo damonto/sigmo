@@ -8,6 +8,20 @@ func secureElementTitle(_ id: String, elements: [SecureElement]) -> String {
     return "SE \(index + 1)"
 }
 
+struct ModemOverviewCardSurface: ViewModifier {
+    static let shape = RoundedRectangle(cornerRadius: 22)
+
+    func body(content: Content) -> some View {
+        content.background {
+            Color.clear
+                .glassEffect(.regular, in: Self.shape)
+                .clipShape(Self.shape)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
 struct ModemOverviewCardRow: ViewModifier {
     func body(content: Content) -> some View {
         content

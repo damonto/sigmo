@@ -11,8 +11,7 @@ struct ModemNetworkCard<SlotPicker: View>: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 22)
-        return VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
                     heading
@@ -34,8 +33,7 @@ struct ModemNetworkCard<SlotPicker: View>: View {
         .padding(.top, 13)
         .padding(.bottom, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: shape)
-        .overlay { shape.strokeBorder(accent.opacity(0.18)).allowsHitTesting(false) }
+        .modifier(ModemOverviewCardSurface())
     }
 
     private var heading: some View {

@@ -8,7 +8,6 @@ struct InternetTrafficCard: View {
 
     var body: some View {
         let history = state.history
-        let shape = RoundedRectangle(cornerRadius: 22)
         VStack(alignment: .leading, spacing: 10) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
@@ -46,16 +45,16 @@ struct InternetTrafficCard: View {
         .padding(.vertical, 13)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            shape.fill(Color(uiColor: .secondarySystemGroupedBackground))
+            Color.clear
                 .overlay(alignment: .bottom) {
                     chart(history.points)
                         .frame(height: 58)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
                 }
-                .clipShape(shape)
+                .clipShape(ModemOverviewCardSurface.shape)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
         }
-        .overlay { shape.strokeBorder(accent.opacity(0.18)).allowsHitTesting(false) }
+        .modifier(ModemOverviewCardSurface())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("internetTrafficCard")
     }

@@ -71,13 +71,11 @@ struct ESIMProfilesSection: View {
     }
 
     private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 22)
-        return VStack(alignment: .leading, spacing: 0, content: content)
+        VStack(alignment: .leading, spacing: 0, content: content)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .secondarySystemGroupedBackground), in: shape)
-            .overlay { shape.strokeBorder(accent.opacity(0.18)).allowsHitTesting(false) }
+            .modifier(ModemOverviewCardSurface())
             .modifier(ModemOverviewCardRow())
     }
 
