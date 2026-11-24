@@ -3,7 +3,6 @@ import SwiftUI
 struct InternetTrafficCard: View {
     let state: InternetTrafficState
     let accent: Color
-    let iconTint: Color
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
 
@@ -64,7 +63,7 @@ struct InternetTrafficCard: View {
     private var title: some View {
         HStack(spacing: 6) {
             Image(systemName: "globe")
-                .foregroundStyle(iconTint)
+                .foregroundStyle(accent)
             Text("connection.internet")
         }
         .font(.headline)

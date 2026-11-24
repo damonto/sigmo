@@ -1,5 +1,22 @@
 import SwiftUI
 
+struct IMSServiceIcon: View {
+    enum Service: String {
+        case voLTE = "ims-volte"
+        case wiFiCalling = "ims-vowifi"
+    }
+
+    let service: Service
+    @ScaledMetric(relativeTo: .caption) private var size = 14.0
+
+    var body: some View {
+        Image(service.rawValue)
+            .resizable()
+            .scaledToFit()
+            .frame(width: size * 1.4, height: size)
+    }
+}
+
 struct ModemStatusIcons: View {
     let modem: Modem
     let capabilities: Set<String>
@@ -14,16 +31,12 @@ struct ModemStatusIcons: View {
                     .accessibilityLabel(Text("modem.dataConnected"))
             }
             if capabilities.contains("wifiCalling"), modem.wifiCallingStatus == .connected {
-                Image("ims-vowifi")
-                    .resizable().scaledToFit()
-                    .frame(width: iconSize * 1.4, height: iconSize)
+                IMSServiceIcon(service: .wiFiCalling)
                     .accessibilityLabel(Text("modem.wifiConnected"))
                     .accessibilityValue(Text("common.connected"))
             }
             if capabilities.contains("volte"), modem.volteStatus == .connected {
-                Image("ims-volte")
-                    .resizable().scaledToFit()
-                    .frame(width: iconSize * 1.4, height: iconSize)
+                IMSServiceIcon(service: .voLTE)
                     .accessibilityLabel(Text("modem.volteConnected"))
                     .accessibilityIdentifier("volte-\(identity ?? modem.id)")
             }

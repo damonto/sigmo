@@ -3,7 +3,6 @@ import SwiftUI
 struct ESIMProfilesSection: View {
     let state: ModemDetailState
     let accent: Color
-    let iconTint: Color
     let operation: ESIMProfileOperation?
     let isAddingESIM: Bool
     let preparingElementID: String?
@@ -85,7 +84,7 @@ struct ESIMProfilesSection: View {
     private func heading(subtitle: String? = nil) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "simcard")
-                .foregroundStyle(iconTint)
+                .foregroundStyle(accent)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("detail.profiles").font(.headline).accessibilityAddTraits(.isHeader)

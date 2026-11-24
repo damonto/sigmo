@@ -4,7 +4,6 @@ struct ModemNetworkCard<SlotPicker: View>: View {
     let modem: Modem
     let capabilities: Set<String>
     let accent: Color
-    let iconTint: Color
     @ViewBuilder let slotPicker: () -> SlotPicker
 
     @ScaledMetric(relativeTo: .largeTitle) private var signalSize = 34.0
@@ -42,7 +41,7 @@ struct ModemNetworkCard<SlotPicker: View>: View {
     private var heading: some View {
         HStack(spacing: 6) {
             Image(systemName: "waveform.path")
-                .foregroundStyle(iconTint)
+                .foregroundStyle(accent)
                 .accessibilityHidden(true)
             Text("detail.networkStatus")
                 .accessibilityAddTraits(.isHeader)
@@ -144,7 +143,7 @@ struct ModemNetworkCard<SlotPicker: View>: View {
                     }
                 }
                 .font(.system(size: symbolSize, weight: .medium))
-                .foregroundStyle(iconTint)
+                .foregroundStyle(accent)
                 (value ?? Text(verbatim: "—"))
                     .font(.system(size: signalSize, weight: .semibold))
                     .monospacedDigit()
@@ -182,30 +181,29 @@ struct ModemNetworkCard<SlotPicker: View>: View {
     }
 
     @ViewBuilder private func serviceItems(horizontal: Bool) -> some View {
-        service("detail.mobileData", icon: "arrow.up.arrow.down", status: modem.mobileDataStatus)
+        service("detail.mobileData", icon: Image(systemName: "arrow.up.arrow.down"), status: modem.mobileDataStatus)
             .fixedSize(horizontal: horizontal, vertical: false)
             .accessibilityIdentifier("modemNetworkData")
         if capabilities.contains("volte") {
             if horizontal { Spacer(minLength: 14) }
-            service("capability.volte", icon: "phone", status: modem.volteStatus)
+            service("capability.volte", icon: IMSServiceIcon(service: .voLTE), status: modem.volteStatus)
                 .fixedSize(horizontal: horizontal, vertical: false)
                 .accessibilityIdentifier("modemNetworkVoLTE")
         }
         if capabilities.contains("wifiCalling") {
             if horizontal { Spacer(minLength: 14) }
-            service("capability.wifiCalling", icon: "wifi", status: modem.wifiCallingStatus)
+            service("capability.wifiCalling", icon: IMSServiceIcon(service: .wiFiCalling), status: modem.wifiCallingStatus)
                 .fixedSize(horizontal: horizontal, vertical: false)
                 .accessibilityIdentifier("modemNetworkWiFiCalling")
         }
     }
 
-    private func service(_ title: LocalizedStringKey, icon: String, status: ModemConnectionStatus) -> some View {
+    private func service(_ title: LocalizedStringKey, icon: some View, status: ModemConnectionStatus) -> some View {
         let connected = status == .connected
         let value = Text(verbatim: status.displayName)
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .foregroundStyle(iconTint)
+                icon.foregroundStyle(accent)
                 Text(title)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

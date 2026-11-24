@@ -81,7 +81,6 @@ private struct ModemDetailScreen: View {
     @State private var networkCardScrolled = false
     @State private var internetTraffic = InternetTrafficState()
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -301,26 +300,15 @@ private struct ModemDetailScreen: View {
         .onDisappear { pending = nil; profileOperation = nil; cancelPreparation(); sim.stop() }
     }
 
-    private var overviewAccent: Color {
-        colorScheme == .dark
-            ? Color(red: 0.73, green: 0.70, blue: 1)
-            : Color(red: 0.32, green: 0.26, blue: 0.75)
-    }
-
     private var overview: some View {
-        let sim = state.needsSIMUnlock ? nil : state.modem?.sim
-        return CarrierLogo(icon: sim?.icon, plmn: sim?.operatorIdentifier, regionCode: sim?.regionCode ?? "")
-            .withTint { _, tint in
-                let iconTint = tint?.mix(with: colorScheme == .dark ? .white : .black, by: 0.5, in: .device) ?? overviewAccent
-                overviewList(iconTint: iconTint)
-            }
+        overviewList
             // Multiple profile buttons share a list row, so the overview owns their destination.
             .navigationDestination(item: $selectedProfileID) { profileID in
                 ESIMProfileActionsView(state: state, profileID: profileID) { profileOperation = $0 }
             }
     }
 
-    private func overviewList(iconTint: Color) -> some View {
+    private var overviewList: some View {
         let target = trafficTarget
         let showsTraffic = target != nil && internetTraffic.connectedTarget == target
         return List {
@@ -334,18 +322,17 @@ private struct ModemDetailScreen: View {
                 if showsNetworkBar || showsTraffic || state.esim {
                     Section {
                         if showsNetworkBar {
-                            networkCard(modem, iconTint: iconTint)
+                            networkCard(modem)
                                 .modifier(ModemOverviewCardRow())
                         }
                         if showsTraffic {
-                            InternetTrafficCard(state: internetTraffic, accent: overviewAccent, iconTint: iconTint)
+                            InternetTrafficCard(state: internetTraffic, accent: .accentColor)
                                 .modifier(ModemOverviewCardRow())
                         }
                         if state.esim {
                             ESIMProfilesSection(
                                 state: state,
-                                accent: overviewAccent,
-                                iconTint: iconTint,
+                                accent: .accentColor,
                                 operation: profileOperation,
                                 isAddingESIM: addingESIM,
                                 preparingElementID: preparingFlow?.seID,
@@ -479,8 +466,8 @@ private struct ModemDetailScreen: View {
         }
     }
 
-    private func networkCard(_ modem: Modem, iconTint: Color) -> some View {
-        ModemNetworkCard(modem: modem, capabilities: session.capabilities ?? [], accent: overviewAccent, iconTint: iconTint) {
+    private func networkCard(_ modem: Modem) -> some View {
+        ModemNetworkCard(modem: modem, capabilities: session.capabilities ?? [], accent: .accentColor) {
             if let slots = modem.slots, slots.count > 1 {
                 slotMenu(slots, selectedSlot: modem.sim.slot)
                     .buttonStyle(.bordered)

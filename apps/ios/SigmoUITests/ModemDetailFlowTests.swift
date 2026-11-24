@@ -334,7 +334,7 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertEqual(app.staticTexts["seStorage-se-a"].value as? String, "64 KiB")
     }
 
-    func testInternetTrafficCardShowsLiveRatesAndUsesCarrierIconTint() throws {
+    func testInternetTrafficCardShowsLiveRatesAndUsesSystemIconTint() throws {
         let app = launch("detail-traffic")
         let card = app.descendants(matching: .any)["internetTrafficCard"].firstMatch
         let networkCard = app.descendants(matching: .any)["esimNetworkBar"].firstMatch
@@ -355,11 +355,11 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue(["1 Mb/s", "2 Mb/s"].contains(download.value as? String ?? ""))
         XCTAssertNotEqual(usage.value as? String, "Unknown")
         XCTAssertTrue(app.staticTexts["Last 30 seconds"].exists)
-        try assertTint(heading, red: true, minimumCoverage: 0.01)
+        try assertSystemTint(heading, minimumCoverage: 0.01)
         screenshot(app, name: "Live Internet traffic")
     }
 
-    func testNetworkCardTitlesRegisteredOperatorAndFollowsTheActiveSIMLogo() throws {
+    func testNetworkCardTitlesRegisteredOperatorAndKeepsSystemIconTintAcrossSIMSlots() throws {
         let app = launch("detail-roaming")
         let card = app.descendants(matching: .any)["esimNetworkBar"].firstMatch
         let registration = app.descendants(matching: .any)["modemNetworkRegistration"].firstMatch
@@ -386,8 +386,11 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertEqual(services[0].minX, card.frame.minX + 16, accuracy: 1)
         XCTAssertEqual(services[2].maxX, card.frame.maxX - 16, accuracy: 1)
         XCTAssertEqual(services[1].minX - services[0].maxX, services[2].minX - services[1].maxX, accuracy: 1)
-        try assertTint(signal, red: true)
-        screenshot(app, name: "Roaming network card with red logo")
+        try assertSystemTint(signal)
+        for id in ["modemNetworkVoLTE", "modemNetworkWiFiCalling"] {
+            try assertSystemTint(app.descendants(matching: .any)[id].firstMatch, minimumCoverage: 0.008)
+        }
+        screenshot(app, name: "Roaming network card with system tint")
 
         let picker = app.buttons["simSlotPicker"]
         picker.tap()
@@ -395,7 +398,7 @@ final class ModemDetailFlowTests: XCTestCase {
         tap(app.alerts.buttons["confirmDetailAction"].firstMatch, in: app)
         let switched = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'SIM 2' AND enabled == true"), object: picker)
         XCTAssertEqual(XCTWaiter.wait(for: [switched], timeout: 10), .completed)
-        try assertTint(signal, red: false)
+        try assertSystemTint(signal)
 
         let code = card.staticTexts.containing(NSPredicate(format: "label == '23410' OR value == '23410'")).firstMatch
         XCTAssertFalse(code.exists)
@@ -406,7 +409,7 @@ final class ModemDetailFlowTests: XCTestCase {
         screenshot(app, name: "Roaming network card with expanded details")
     }
 
-    private func assertTint(_ element: XCUIElement, red: Bool, minimumCoverage: Double = 0.1) throws {
+    private func assertSystemTint(_ element: XCUIElement, minimumCoverage: Double = 0.1) throws {
         let image = try XCTUnwrap(element.screenshot().image.cgImage)
         var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
         let tintedPixels = try pixels.withUnsafeMutableBytes { buffer in
@@ -420,16 +423,15 @@ final class ModemDetailFlowTests: XCTestCase {
             var count = 0
             for offset in stride(from: 0, to: buffer.count, by: 4) {
                 guard buffer[offset + 3] > 200 else { continue }
-                let matches = red
-                    ? buffer[offset] > 95 && buffer[offset + 1] < 90 && buffer[offset + 2] < 90
-                    : buffer[offset] < 120 && buffer[offset + 1] < 110 && buffer[offset + 2] > 140
-                if matches { count += 1 }
+                let red = Int(buffer[offset])
+                let green = Int(buffer[offset + 1])
+                let blue = Int(buffer[offset + 2])
+                if blue > 150, blue >= green + 40, green >= red + 40 { count += 1 }
             }
             return count
         }
-        let expectedColor = red ? "the logo's red" : "the default violet"
         XCTAssertGreaterThan(Double(tintedPixels) / Double(image.width * image.height), minimumCoverage,
-                             "\(element.label) should use \(expectedColor)")
+                             "\(element.label) should use the system tint")
     }
 
     func testSecureElementMetadataAndCopy() {
@@ -749,6 +751,14 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue(unit.isHittable)
         unit.tap()
         XCTAssertTrue(app.buttons["KiB"].waitForExistence(timeout: 5))
+    }
+
+    func testESIMSetupSheetUsesSystemIconTint() throws {
+        let app = launch("detail-roaming")
+        installForm(app, manual: false)
+        let scan = app.buttons["scanESIM"]
+        XCTAssertTrue(scan.waitForExistence(timeout: 5))
+        try assertSystemTint(scan, minimumCoverage: 0.005)
     }
 
     func testDownloadWithPreviewAndConfirmation() {
