@@ -9,7 +9,7 @@ struct ModemStatusIcons: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            if modem.internetConnected == true {
+            if modem.mobileDataStatus == .connected {
                 Image(systemName: "arrow.up.arrow.down")
                     .accessibilityLabel(Text("modem.dataConnected"))
             }
@@ -20,7 +20,7 @@ struct ModemStatusIcons: View {
                     .accessibilityLabel(Text("modem.wifiConnected"))
                     .accessibilityValue(Text("common.connected"))
             }
-            if capabilities.contains("volte"), modem.hasVoLTEConnection {
+            if capabilities.contains("volte"), modem.volteStatus == .connected {
                 Image("ims-volte")
                     .resizable().scaledToFit()
                     .frame(width: iconSize * 1.4, height: iconSize)

@@ -576,6 +576,11 @@
 "detail.simLocked" = "SIM is locked";
 "detail.networkStatus" = "Network status";
 "detail.networkNotRegistered" = "Not registered";
+"detail.mobileData" = "Mobile data";
+"detail.networkDetails" = "Network details";
+"detail.registeredNetwork" = "Registered network";
+"detail.registeredOperatorCode" = "Registered operator code";
+"detail.simOperator" = "SIM operator";
 "detail.trafficDownload" = "Download";
 "detail.trafficUpload" = "Upload";
 "detail.trafficUsage" = "This connection";

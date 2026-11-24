@@ -8,54 +8,12 @@ func secureElementTitle(_ id: String, elements: [SecureElement]) -> String {
     return "SE \(index + 1)"
 }
 
-struct SecureElementMetadata: View {
-    let element: SecureElement
-
-    static func storageText(_ bytes: Int64?) -> String {
-        bytes.map { "\($0 / 1024)KiB" } ?? "—"
-    }
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                eid.fixedSize()
-                Spacer(minLength: 0)
-                storage.fixedSize()
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                eid.fixedSize(horizontal: false, vertical: true)
-                storage
-            }
-        }
-        .font(.caption.monospaced())
-        .foregroundStyle(Color.secondary)
-        .textCase(nil)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var eid: some View {
-        Menu {
-            if let eid = element.eid, !eid.isEmpty {
-                Button("detail.copy", systemImage: "document.on.document") {
-                    UIPasteboard.general.string = eid
-                }
-            }
-        } label: {
-            Text(modemValue(element.eid))
-                .multilineTextAlignment(.leading)
-        }
-        .buttonStyle(.plain)
-        .disabled(element.eid?.isEmpty != false)
-        .accessibilityLabel(Text("detail.eid"))
-        .accessibilityValue(modemValue(element.eid))
-        .accessibilityIdentifier("seEID-" + element.id)
-    }
-
-    private var storage: some View {
-        Text(Self.storageText(element.freeSpace))
-            .accessibilityLabel(Text("detail.storage"))
-            .accessibilityValue(Self.storageText(element.freeSpace))
-            .accessibilityIdentifier("seStorage-" + element.id)
+struct ModemOverviewCardRow: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .listRowInsets(EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
     }
 }
 

@@ -42,7 +42,7 @@ func checkWiFiProxy(ctx context.Context, underlay socks5Underlay) wifiProxyCheck
 	defer cancel()
 	var result wifiProxyCheckResult
 	var probes sync.WaitGroup
-	probes.Go(func() { result.TCP = checkWiFiProxyTCP(ctx, underlay, pinternet.LookupIPInfo) })
+	probes.Go(func() { result.TCP = checkWiFiProxyTCP(ctx, underlay, pinternet.LookupPublicIP) })
 	probes.Go(func() { result.UDP = checkWiFiProxyUDP(ctx, underlay, wifiProxyCheckSTUN) })
 	probes.Go(func() {
 		start := time.Now()
@@ -56,7 +56,7 @@ func checkWiFiProxy(ctx context.Context, underlay socks5Underlay) wifiProxyCheck
 	return result
 }
 
-func checkWiFiProxyTCP(ctx context.Context, underlay socks5Underlay, lookup func(context.Context, *http.Client) (pinternet.IPInfo, error)) wifiProxyCheckStep {
+func checkWiFiProxyTCP(ctx context.Context, underlay socks5Underlay, lookup func(context.Context, *http.Client) (pinternet.PublicIPInfo, error)) wifiProxyCheckStep {
 	start := time.Now()
 	var serverAddress atomic.Pointer[string]
 	client := wifiCallingHTTPClientWithDial(func(ctx context.Context, network, address string) (net.Conn, error) {

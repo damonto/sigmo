@@ -265,6 +265,8 @@ final class BackendFlowTests: XCTestCase {
         XCTAssertEqual(registration.label, "Airplane mode")
         XCTAssertEqual(app.staticTexts["modemNetworkTitle"].label, "Example Mobile")
         XCTAssertFalse(app.descendants(matching: .any)["signal-device-1"].exists)
+        XCTAssertEqual(app.descendants(matching: .any)["modemNetworkTechnology"].firstMatch.value as? String, "Unknown")
+        XCTAssertEqual(app.descendants(matching: .any)["modemNetworkData"].firstMatch.value as? String, "Disconnected")
     }
 
     func testLocalSearchAndConnectionTabsFilterTogether() {

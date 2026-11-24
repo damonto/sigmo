@@ -576,6 +576,11 @@
 "detail.simLocked" = "SIM 已锁定";
 "detail.networkStatus" = "网络状态";
 "detail.networkNotRegistered" = "未注册";
+"detail.mobileData" = "移动数据";
+"detail.networkDetails" = "网络详情";
+"detail.registeredNetwork" = "注册网络";
+"detail.registeredOperatorCode" = "注册运营商代码";
+"detail.simOperator" = "SIM 运营商";
 "detail.trafficDownload" = "下载";
 "detail.trafficUpload" = "上传";
 "detail.trafficUsage" = "本次连接已用";

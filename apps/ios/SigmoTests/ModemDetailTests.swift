@@ -174,9 +174,9 @@ final class ModemDetailTests: XCTestCase {
 
     func testSecureElementStorageUsesWholeKiB() {
         let cases: [(bytes: Int64?, expected: String)] = [
-            (nil, "—"), (0, "0KiB"), (1023, "0KiB"),
-            (1024, "1KiB"), (1536, "1KiB"), (65536, "64KiB"),
-            (1048576, "1024KiB")
+            (nil, "—"), (0, "0 KiB"), (1023, "0 KiB"),
+            (1024, "1 KiB"), (1536, "1 KiB"), (65536, "64 KiB"),
+            (1048576, "1024 KiB")
         ]
         for item in cases {
             XCTAssertEqual(SecureElementMetadata.storageText(item.bytes), item.expected)

@@ -98,7 +98,7 @@ struct SIMInfoSections: View {
                 DetailValue(title: "modem.operatorCode", value: modem.registeredOperator.code)
                 DetailValue(title: "modem.signal", value: "\(modem.signalPercent)%")
             }
-            DetailValue(title: "modem.data", value: modem.internetConnected.map { detailText($0 ? "common.connected" : "common.disconnected") })
+            DetailValue(title: "modem.data", value: modem.mobileDataStatus.displayName)
             if capabilities.contains("wifiCalling") {
                 DetailValue(title: "capability.wifiCalling", value: modem.wifiCallingStatus.displayName)
                     .accessibilityIdentifier("modemWiFiCallingStatus")

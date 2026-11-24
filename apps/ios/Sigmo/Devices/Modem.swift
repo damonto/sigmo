@@ -53,8 +53,12 @@ struct Modem: Codable, Identifiable, Sendable, Equatable {
     let volteEnabled: Bool?
     let volteConnected: Bool?
 
-    var wifiCallingStatus: IMSConnectionState { .init(enabled: wifiCallingEnabled, connected: wifiCallingConnected) }
-    var volteStatus: IMSConnectionState { .init(enabled: volteEnabled, connected: volteConnected) }
+    var mobileDataStatus: ModemConnectionStatus { .init(connected: airplaneMode ? false : internetConnected) }
+    var wifiCallingStatus: ModemConnectionStatus { .init(enabled: wifiCallingEnabled, connected: wifiCallingConnected) }
+    var volteStatus: ModemConnectionStatus {
+        let status = ModemConnectionStatus(enabled: volteEnabled, connected: volteConnected)
+        return airplaneMode && status == .connected ? .disconnected : status
+    }
 
     var communicationLabel: String { sim.label.flatMap { $0.isEmpty ? nil : $0 } ?? (sim.operatorName.isEmpty ? displayName : sim.operatorName) }
     var displayName: String { name.isEmpty ? id : name }
@@ -71,14 +75,19 @@ struct Modem: Codable, Identifiable, Sendable, Equatable {
         return CellularRegistration(rawValue: state) ?? .unknown
     }
 
-    var networkOverviewCarrier: String? {
+    var cellularOperator: RegisteredOperator? {
         let registration = cellularRegistration
-        if !airplaneMode, registration == .home || registration == .roaming,
-           let name = registeredOperator.displayName { return name }
-        return [sim.operatorName, sim.operatorIdentifier].lazy
+        guard !airplaneMode, registration == .home || registration == .roaming else { return nil }
+        return registeredOperator
+    }
+
+    var simOperatorName: String? {
+        [sim.operatorName, sim.operatorIdentifier].lazy
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty }
     }
+
+    var networkOverviewCarrier: String? { cellularOperator?.displayName ?? simOperatorName }
 
     var signalPercent: Int { min(100, max(0, signalQuality)) }
 
@@ -92,19 +101,28 @@ struct Modem: Codable, Identifiable, Sendable, Equatable {
               !technology.isEmpty else { return nil }
         return technology
     }
-
-    var hasVoLTEConnection: Bool { !airplaneMode && volteStatus == .connected }
 }
 
-// Both IMS services use the same presentation without guessing omitted API values.
-enum IMSConnectionState: Equatable {
+enum ModemConnectionStatus: Equatable {
     case disabled, connected, disconnected, unknown
 
+    init(connected: Bool?) {
+        switch connected {
+        case true?: self = .connected
+        case false?: self = .disconnected
+        case nil: self = .unknown
+        }
+    }
+
     init(enabled: Bool?, connected: Bool?) {
-        if enabled == false { self = .disabled }
-        else if connected == true { self = .connected }
-        else if enabled == true && connected == false { self = .disconnected }
-        else { self = .unknown }
+        if enabled == false {
+            self = .disabled
+        } else if enabled == true || connected == true {
+            self.init(connected: connected)
+        } else {
+            // Older responses may report false without saying whether the service is enabled.
+            self = .unknown
+        }
     }
 
     var displayName: String {

@@ -13,7 +13,7 @@ import (
 type InternetConnections interface {
 	Current(context.Context, *modem.Modem) (*internet.Connection, error)
 	Traffic(context.Context, *modem.Modem) (internet.TrafficStatus, error)
-	Public(context.Context, *modem.Modem) (internet.IPInfo, error)
+	Public(context.Context, *modem.Modem) (internet.PublicIPInfo, error)
 	Connect(context.Context, *modem.Modem, internet.Preferences) (*internet.Connection, error)
 	UpdatePreferences(context.Context, *modem.Modem, internet.ConnectionPreferences) (*internet.Connection, error)
 	Disconnect(context.Context, *modem.Modem) error

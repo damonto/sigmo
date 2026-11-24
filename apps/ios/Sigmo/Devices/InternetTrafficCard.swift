@@ -76,13 +76,12 @@ struct InternetTrafficCard: View {
     }
 
     private var connected: some View {
-        Label {
-            Text("common.connected")
-        } icon: {
+        HStack(spacing: 4) {
             Image(systemName: "circle.fill")
                 .imageScale(.small)
                 .foregroundStyle(.green)
                 .accessibilityHidden(true)
+            Text("common.connected")
         }
         .font(.caption.weight(.semibold))
         .padding(.horizontal, 8)

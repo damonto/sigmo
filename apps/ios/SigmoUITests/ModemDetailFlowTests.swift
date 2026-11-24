@@ -146,10 +146,12 @@ final class ModemDetailFlowTests: XCTestCase {
             let active = app.buttons["profileActions-se-a:8986000000000000001"]
             let inactive = app.buttons["profileActions-se-a:8986000000000000002"]
             XCTAssertTrue(active.waitForExistence(timeout: 5))
+            XCTAssertGreaterThanOrEqual(active.frame.height, 68)
+            XCTAssertTrue(app.staticTexts[chinese ? "2 个配置" : "2 profiles"].exists)
             XCTAssertTrue(active.label.contains("Primary"), active.label)
             XCTAssertTrue(active.label.contains("+86 138 0000 0000"), active.label)
             XCTAssertFalse(active.label.contains("8986000000000000001"), active.label)
-            // Large Dynamic Type can leave the second lazy list row offscreen.
+            // Large Dynamic Type can leave the second profile offscreen.
             let list = app.collectionViews.firstMatch
             for _ in 0..<8 where !inactive.exists {
                 XCTAssertTrue(list.exists, app.debugDescription)
@@ -254,8 +256,8 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["SIM 1"].exists)
         XCTAssertFalse(app.staticTexts["SE 1"].exists)
         XCTAssertTrue(app.staticTexts["eSIMs"].firstMatch.exists)
-        XCTAssertEqual(app.buttons["seEID-se-a"].value as? String, "89049032000000000000000000000001")
-        XCTAssertEqual(app.staticTexts["seStorage-se-a"].value as? String, "64KiB")
+        XCTAssertEqual(app.buttons["seEID-se-a"].value as? String, "0001")
+        XCTAssertEqual(app.staticTexts["seStorage-se-a"].value as? String, "64 KiB")
         XCTAssertFalse(app.buttons["seEID-se-b"].exists)
         screenshot(app, name: "Single SIM and eSIM overview")
         app.buttons["modemInfo"].tap()
@@ -303,7 +305,7 @@ final class ModemDetailFlowTests: XCTestCase {
         let skeleton = app.descendants(matching: .any)["profileLoading"].firstMatch
         XCTAssertTrue(skeleton.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["seEID-se-a"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["seStorage-se-a"].value as? String, "64KiB")
+        XCTAssertEqual(app.staticTexts["seStorage-se-a"].value as? String, "64 KiB")
         XCTAssertTrue(skeleton.exists)
         XCTAssertFalse(app.buttons["profileActions-se-a:8986000000000000001"].exists)
         XCTAssertFalse(app.buttons["addESIM-se-a"].exists)
@@ -329,19 +331,24 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertFalse(app.buttons["Retry"].exists)
         XCTAssertTrue(app.buttons["seEID-se-a"].exists)
         XCTAssertTrue(app.buttons["seEID-se-b"].exists)
-        XCTAssertEqual(app.staticTexts["seStorage-se-a"].value as? String, "64KiB")
+        XCTAssertEqual(app.staticTexts["seStorage-se-a"].value as? String, "64 KiB")
     }
 
     func testInternetTrafficCardShowsLiveRatesAndUsesCarrierIconTint() throws {
         let app = launch("detail-traffic")
         let card = app.descendants(matching: .any)["internetTrafficCard"].firstMatch
         let networkCard = app.descendants(matching: .any)["esimNetworkBar"].firstMatch
+        let profilesCard = app.descendants(matching: .any)["esimProfilesCard-se-a"].firstMatch
         let download = app.descendants(matching: .any)["internetTrafficDownload"].firstMatch
         let upload = app.descendants(matching: .any)["internetTrafficUpload"].firstMatch
         let usage = app.descendants(matching: .any)["internetTrafficUsage"].firstMatch
         let heading = card.descendants(matching: .any)["internetTrafficHeading"].firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(card.frame.minY, networkCard.frame.maxY)
+        XCTAssertTrue(profilesCard.waitForExistence(timeout: 5))
+        XCTAssertEqual(profilesCard.frame.minX, card.frame.minX, accuracy: 1)
+        XCTAssertEqual(profilesCard.frame.maxX, card.frame.maxX, accuracy: 1)
+        XCTAssertEqual(profilesCard.frame.minY - card.frame.maxY, card.frame.minY - networkCard.frame.maxY, accuracy: 1)
         XCTAssertEqual(heading.label, "Internet")
         let sampled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == '200 kb/s'"), object: upload)
         XCTAssertEqual(XCTWaiter.wait(for: [sampled], timeout: 5), .completed)
@@ -354,6 +361,7 @@ final class ModemDetailFlowTests: XCTestCase {
 
     func testNetworkCardTitlesRegisteredOperatorAndFollowsTheActiveSIMLogo() throws {
         let app = launch("detail-roaming")
+        let card = app.descendants(matching: .any)["esimNetworkBar"].firstMatch
         let registration = app.descendants(matching: .any)["modemNetworkRegistration"].firstMatch
         let title = app.staticTexts["modemNetworkTitle"]
         XCTAssertTrue(registration.waitForExistence(timeout: 5))
@@ -362,6 +370,22 @@ final class ModemDetailFlowTests: XCTestCase {
         let signal = app.descendants(matching: .any)["signal-device-1"].firstMatch
         XCTAssertTrue(signal.waitForExistence(timeout: 5))
         XCTAssertEqual(signal.value as? String, "78%")
+        for (id, value) in [("Technology", "LTE"), ("Data", "Connected"), ("VoLTE", "Connected"), ("WiFiCalling", "Disabled")] {
+            let status = app.descendants(matching: .any)["modemNetwork" + id].firstMatch
+            XCTAssertEqual(status.value as? String, value, id)
+        }
+        let services = ["Data", "VoLTE", "WiFiCalling"].map {
+            app.descendants(matching: .any)["modemNetwork" + $0].firstMatch.frame
+        }
+        for (left, right) in zip(services, services.dropFirst()) {
+            XCTAssertEqual(left.minY, right.minY, accuracy: 1, "Service statuses should share a row at the default text size")
+            XCTAssertEqual(left.height, right.height, accuracy: 1, "Service labels should fit on one line")
+            XCTAssertGreaterThanOrEqual(right.minX, left.maxX)
+        }
+        XCTAssertLessThan(services[1].width, services[2].width, "VoLTE should leave room for the longer Wi-Fi Calling label")
+        XCTAssertEqual(services[0].minX, card.frame.minX + 16, accuracy: 1)
+        XCTAssertEqual(services[2].maxX, card.frame.maxX - 16, accuracy: 1)
+        XCTAssertEqual(services[1].minX - services[0].maxX, services[2].minX - services[1].maxX, accuracy: 1)
         try assertTint(signal, red: true)
         screenshot(app, name: "Roaming network card with red logo")
 
@@ -372,7 +396,14 @@ final class ModemDetailFlowTests: XCTestCase {
         let switched = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'SIM 2' AND enabled == true"), object: picker)
         XCTAssertEqual(XCTWaiter.wait(for: [switched], timeout: 10), .completed)
         try assertTint(signal, red: false)
-        screenshot(app, name: "Roaming network card with white logo")
+
+        let code = card.staticTexts.containing(NSPredicate(format: "label == '23410' OR value == '23410'")).firstMatch
+        XCTAssertFalse(code.exists)
+        tap(app.descendants(matching: .any)["modemNetworkDetails"].firstMatch, in: app)
+        XCTAssertTrue(code.waitForExistence(timeout: 5), app.debugDescription)
+        let simOperator = card.staticTexts.containing(NSPredicate(format: "label == 'Example Mobile' OR value == 'Example Mobile'")).firstMatch
+        XCTAssertTrue(simOperator.exists)
+        screenshot(app, name: "Roaming network card with expanded details")
     }
 
     private func assertTint(_ element: XCUIElement, red: Bool, minimumCoverage: Double = 0.1) throws {
@@ -404,22 +435,24 @@ final class ModemDetailFlowTests: XCTestCase {
     func testSecureElementMetadataAndCopy() {
         let app = launch()
         XCTAssertTrue(app.buttons["addESIM-se-a"].waitForExistence(timeout: 5))
-        screenshot(app, name: "SE metadata below headings")
-        for (id, eid, storage) in [
-            ("se-a", "89049032000000000000000000000001", "64KiB"),
-            ("se-b", "89049032000000000000000000000002", "32KiB")
+        screenshot(app, name: "eSIM cards and metadata")
+        for (id, eid, storage, countLabel) in [
+            ("se-a", "89049032000000000000000000000001", "64 KiB", "2 profiles"),
+            ("se-b", "89049032000000000000000000000002", "32 KiB", "1 profile")
         ] {
             let identifier = app.buttons["seEID-" + id]
-            XCTAssertTrue(identifier.waitForExistence(timeout: 5))
-            XCTAssertEqual(identifier.value as? String, eid)
+            for _ in 0..<4 where !identifier.isHittable { app.swipeUp() }
+            XCTAssertTrue(identifier.isHittable, "Could not reach EID for \(id)")
+            XCTAssertEqual(identifier.value as? String, String(eid.suffix(4)))
             XCTAssertEqual(app.staticTexts["seStorage-" + id].value as? String, storage)
-            XCTAssertLessThan(identifier.frame.maxY, app.buttons["addESIM-" + id].frame.minY)
+            XCTAssertTrue(app.staticTexts[countLabel].exists)
+            XCTAssertLessThan(app.buttons["addESIM-" + id].frame.midY, identifier.frame.midY)
             identifier.press(forDuration: 1)
             screenshot(app, name: "EID copy menu " + id)
             let copy = app.buttons["Copy"]
             XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
             copy.tap()
-            openActions(app)
+            openActions(app, profile: id + ":8986000000000000002")
             app.buttons["Label"].tap()
             let input = app.textFields["detailInput"]
             replace(input, value: "")
@@ -432,7 +465,7 @@ final class ModemDetailFlowTests: XCTestCase {
             XCTAssertTrue(input.waitForNonExistence(timeout: 5))
             app.navigationBars.buttons.element(boundBy: 0).tap()
         }
-        screenshot(app, name: "SE metadata below headings")
+        screenshot(app, name: "eSIM cards after copying EID")
     }
 
     func testNetworkCardCollapsesWhileScrollingAndKeepsSlotPicker() {
@@ -581,11 +614,14 @@ final class ModemDetailFlowTests: XCTestCase {
         screenshot(app, name: "Compact eSIM overview")
         XCTAssertEqual(install.label, "Add eSIM")
         XCTAssertGreaterThanOrEqual(install.frame.height, 44)
+        let idleWidth = install.frame.width
         XCTAssertFalse(app.buttons["installESIM"].exists)
-        tapOverviewRow(app.buttons["addESIM-se-b"], in: app)
+        tapOverviewRow(install, in: app)
         XCTAssertTrue(app.activityIndicators.firstMatch.waitForExistence(timeout: 2))
-        XCTAssertFalse(app.buttons["addESIM-se-a"].isEnabled)
+        XCTAssertFalse(install.isEnabled)
         XCTAssertFalse(app.buttons["addESIM-se-b"].isEnabled)
+        XCTAssertEqual(install.label, "Add eSIM")
+        XCTAssertGreaterThan(install.frame.width, idleWidth)
         XCTAssertFalse(app.buttons["closeESIMFlow"].exists)
         screenshot(app, name: "Add eSIM loading on row")
         XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 10))

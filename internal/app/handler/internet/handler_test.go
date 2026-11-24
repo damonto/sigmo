@@ -150,12 +150,12 @@ func TestResponseFromPublic(t *testing.T) {
 
 	tests := []struct {
 		name string
-		info internetcore.IPInfo
+		info internetcore.PublicIPInfo
 		want PublicResponse
 	}{
 		{
 			name: "public info",
-			info: internetcore.IPInfo{
+			info: internetcore.PublicIPInfo{
 				IP:           "209.9.201.161",
 				Country:      "HK",
 				Organization: "AS4760 HKT Limited",

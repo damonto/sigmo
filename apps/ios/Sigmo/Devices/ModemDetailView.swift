@@ -66,6 +66,7 @@ private struct ModemDetailScreen: View {
     @State private var automationLine: SIMAutomationLine?
     @State private var confirmation: SIMSlot?
     @State private var pending: SlotChange?
+    @State private var selectedProfileID: String?
     @State private var profileOperation: ESIMProfileOperation?
     @State private var presentedFailure: BackendFailure?
     @State private var preparingFlow: ESIMFlowState?
@@ -313,6 +314,10 @@ private struct ModemDetailScreen: View {
                 let iconTint = tint?.mix(with: colorScheme == .dark ? .white : .black, by: 0.5, in: .device) ?? overviewAccent
                 overviewList(iconTint: iconTint)
             }
+            // Multiple profile buttons share a list row, so the overview owns their destination.
+            .navigationDestination(item: $selectedProfileID) { profileID in
+                ESIMProfileActionsView(state: state, profileID: profileID) { profileOperation = $0 }
+            }
     }
 
     private func overviewList(iconTint: Color) -> some View {
@@ -320,34 +325,41 @@ private struct ModemDetailScreen: View {
         let showsTraffic = target != nil && internetTraffic.connectedTarget == target
         return List {
             if let modem = state.modem {
-                if showsNetworkBar || showsTraffic {
-                    Section {
-                        if showsNetworkBar {
-                            overviewCardRow {
-                                networkCard(modem, iconTint: iconTint)
-                            }
-                        }
-                        if showsTraffic {
-                            overviewCardRow {
-                                InternetTrafficCard(state: internetTraffic, accent: overviewAccent, iconTint: iconTint)
-                            }
-                        }
-                    }
-                }
                 if state.needsSIMUnlock {
                     Section {
                         Label("detail.simLocked", systemImage: "lock")
                         Button("detail.unlock") { sheet = .pin }
                     }
-                } else if !state.esim, !isPhysicalSIM {
-                    slotSection(modem)
                 }
-                if state.esim {
-                    profiles
-                } else if isPhysicalSIM {
+                if showsNetworkBar || showsTraffic || state.esim {
+                    Section {
+                        if showsNetworkBar {
+                            networkCard(modem, iconTint: iconTint)
+                                .modifier(ModemOverviewCardRow())
+                        }
+                        if showsTraffic {
+                            InternetTrafficCard(state: internetTraffic, accent: overviewAccent, iconTint: iconTint)
+                                .modifier(ModemOverviewCardRow())
+                        }
+                        if state.esim {
+                            ESIMProfilesSection(
+                                state: state,
+                                accent: overviewAccent,
+                                iconTint: iconTint,
+                                operation: profileOperation,
+                                isAddingESIM: addingESIM,
+                                preparingElementID: preparingFlow?.seID,
+                                selectProfile: { selectedProfileID = $0 },
+                                addESIM: { await prepareFlow(seID: $0) }
+                            )
+                        }
+                    }
+                }
+                if isPhysicalSIM {
                     physicalActions(modem)
                         .disabled(state.loading || state.busy)
-                } else {
+                } else if !state.esim {
+                    if !state.needsSIMUnlock { slotSection(modem) }
                     ModemInfoSections(modem: modem, elements: [], capabilities: session.capabilities ?? [])
                 }
             } else if state.loading {
@@ -483,13 +495,6 @@ private struct ModemDetailScreen: View {
         .accessibilityHidden(networkCardScrolled)
     }
 
-    private func overviewCardRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .listRowInsets(EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6))
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-    }
-
     private func compactNetworkBar(_ modem: Modem) -> some View {
         let carrier = modem.networkOverviewCarrier.map { Text(verbatim: $0) } ?? Text("detail.networkStatus")
         return ViewThatFits(in: .horizontal) {
@@ -556,110 +561,6 @@ private struct ModemDetailScreen: View {
         .accessibilityLabel(Text("detail.switchSlot"))
         .accessibilityValue("SIM \(selectedSlot)")
         .accessibilityIdentifier("simSlotPicker")
-    }
-
-    @ViewBuilder private var profiles: some View {
-        if !state.elements.isEmpty {
-            ForEach(state.elements) { element in
-                profileSection(element)
-            }
-        } else if !state.elementsLoaded, state.failure == nil {
-            Section("detail.profiles") { ProfileSkeletonRows() }
-        } else if state.elementsFailure != nil || state.profilesFailure != nil {
-            Section("detail.profiles") {
-                ContentUnavailableView("detail.profilesUnavailable", systemImage: "simcard")
-            }
-        }
-    }
-
-    private func profileSection(_ element: SecureElement) -> some View {
-        let profiles = state.groups.first { $0.id == element.id }?.profiles ?? []
-        return Section {
-            if !state.profilesLoaded, state.failure == nil {
-                ProfileSkeletonRows()
-            } else if profiles.isEmpty, state.profilesFailure != nil {
-                ContentUnavailableView("detail.profilesUnavailable", systemImage: "simcard")
-            } else {
-                ForEach(profiles) { profile in
-                    profileRow(profile)
-                }
-                if profiles.isEmpty, state.profilesLoaded {
-                    Text("detail.noProfiles").foregroundStyle(.secondary)
-                }
-                AsyncActionButton(id: "addESIM-" + element.id, contentMaxWidth: .infinity, contentAlignment: .leading, action: {
-                    await prepareFlow(seID: element.id)
-                }) {
-                    Text("detail.setupTitle")
-                }
-                .disabled(!state.canInstall || addingESIM)
-                .accessibilityValue(preparingFlow?.seID == element.id ? detailText("detail.checkingESIM") : "")
-            }
-        } header: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("detail.profiles")
-                    if state.elements.count > 1 {
-                        Text("· \(secureElementTitle(element.id, elements: state.elements))")
-                    }
-                    Spacer()
-                    if state.profilesLoaded, state.profilesFailure == nil || !profiles.isEmpty {
-                        Text(profiles.count.formatted()).monospacedDigit()
-                    }
-                }
-                .foregroundStyle(Color(uiColor: .label))
-                SecureElementMetadata(element: element)
-            }
-        }
-    }
-
-    private func profileRow(_ profile: ESIMProfile) -> some View {
-        NavigationLink {
-            ESIMProfileActionsView(state: state, profileID: profile.id) { profileOperation = $0 }
-        } label: {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .top, spacing: 12) {
-                        ProfileAvatar(icon: profile.icon, region: profile.regionCode, plmn: profile.profileOwner.plmn)
-                        Text(profile.name).font(.body).fixedSize(horizontal: false, vertical: true)
-                    }
-                    Text(profile.numberLabel)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack { profileStatus(profile) }
-                }
-            } else {
-                HStack(spacing: 12) {
-                    ProfileAvatar(icon: profile.icon, region: profile.regionCode, plmn: profile.profileOwner.plmn)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(profile.name).font(.body).lineLimit(1)
-                        Text(profile.numberLabel)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 4)
-                    profileStatus(profile)
-                }
-            }
-        }
-        .disabled(profileOperation?.profile.id == profile.id || state.loading)
-        .accessibilityIdentifier("profileActions-" + profile.id)
-    }
-
-    @ViewBuilder private func profileStatus(_ profile: ESIMProfile) -> some View {
-        Group {
-            if let operation = profileOperation, operation.profile.id == profile.id {
-                Text(operation.kind == .enable ? "modem.value.enabling" : "detail.deletingProfile")
-            } else {
-                Text(profile.enabled ? "detail.lineOn" : "detail.lineOff")
-            }
-        }
-        .foregroundStyle(.secondary)
-        if profile.reminder != nil || state.automationSummary(profileID: profile.iccid, seID: profile.seId) != nil {
-            Image(systemName: "bell").font(.caption).foregroundStyle(.secondary)
-                .accessibilityLabel(Text("detail.lineSchedule"))
-        }
     }
 
     @ViewBuilder private func physicalActions(_ modem: Modem) -> some View {
@@ -747,6 +648,7 @@ private struct ModemDetailScreen: View {
     private func clear() {
         cancelPreparation()
         pinState.reset(); flow?.interrupt(); flow = nil; sheet = nil; pending = nil; profileOperation = nil; confirmation = nil; presentedFailure = nil
+        selectedProfileID = nil
         state.clear(); settings.clear(); sim.stop()
         if session.authentication == .required {
             messages.clear()

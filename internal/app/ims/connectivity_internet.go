@@ -22,9 +22,9 @@ func (c *Connectivity) Traffic(ctx context.Context, modem *mmodem.Modem) (pinter
 	return c.internet.Traffic(ctx, modem)
 }
 
-func (c *Connectivity) Public(ctx context.Context, modem *mmodem.Modem) (pinternet.IPInfo, error) {
+func (c *Connectivity) Public(ctx context.Context, modem *mmodem.Modem) (pinternet.PublicIPInfo, error) {
 	if c == nil || c.internet == nil {
-		return pinternet.IPInfo{}, ErrUnavailable
+		return pinternet.PublicIPInfo{}, ErrUnavailable
 	}
 	return c.internet.Public(ctx, modem)
 }

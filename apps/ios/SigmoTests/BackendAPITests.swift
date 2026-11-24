@@ -151,7 +151,7 @@ final class BackendAPITests: XCTestCase {
     }
 
     func testIMSStateDecodingPreservesMissingAndDisabledValues() throws {
-        let cases: [(Bool?, Bool?, IMSConnectionState)] = [
+        let cases: [(Bool?, Bool?, ModemConnectionStatus)] = [
             (false, false, .disabled), (false, true, .disabled), (false, nil, .disabled),
             (true, true, .connected), (true, false, .disconnected), (true, nil, .unknown),
             (nil, true, .connected), (nil, false, .unknown), (nil, nil, .unknown),
@@ -174,14 +174,14 @@ final class BackendAPITests: XCTestCase {
     }
 
     func testCellularStatusUsesAvailableReadingsOnly() throws {
-        let snapshot = PreviewBackendServer.modemJSON(volte: true)
+        let snapshot = PreviewBackendServer.modemJSON(wifiCalling: true, volte: true)
         for (quality, fraction): (Int, Double?) in [(-1, nil), (0, nil), (78, 0.78), (150, 1)] {
             let json = snapshot.replacingOccurrences(of: #""signalQuality":78"#, with: #""signalQuality":\#(quality)"#)
                 .replacingOccurrences(of: #""accessTechnology":"lte""#, with: #""accessTechnology":" LTE ""#)
             let modem = try JSONDecoder().decode(Modem.self, from: Data(json.utf8))
             XCTAssertEqual(modem.cellularSignalFraction, fraction, "signal quality \(quality)")
             XCTAssertEqual(modem.cellularTechnology, "LTE")
-            XCTAssertTrue(modem.hasVoLTEConnection)
+            XCTAssertEqual(modem.volteStatus, .connected)
         }
 
         let blankRadio = snapshot.replacingOccurrences(of: #""accessTechnology":"lte""#, with: #""accessTechnology":"  ""#)
@@ -191,20 +191,27 @@ final class BackendAPITests: XCTestCase {
         let modem = try JSONDecoder().decode(Modem.self, from: Data(airplane.utf8))
         XCTAssertNil(modem.cellularSignalFraction)
         XCTAssertNil(modem.cellularTechnology)
-        XCTAssertFalse(modem.hasVoLTEConnection)
+        XCTAssertEqual(modem.mobileDataStatus, .disconnected)
+        XCTAssertEqual(modem.volteStatus, .disconnected)
+        XCTAssertEqual(modem.wifiCallingStatus, .connected)
     }
 
     func testNetworkOverviewCarrierPrefersOnlyTheCurrentRegistration() throws {
         let snapshot = PreviewBackendServer.modemJSON()
             .replacingOccurrences(of: #""registeredOperator":{"name":"Example Mobile","code":"46000"}"#,
                                   with: #""registeredOperator":{"name":" Travel Mobile ","code":"23410"}"#)
-        for (state, expected) in [("Home", "Travel Mobile"), (" Roaming ", "Travel Mobile"),
-                                  ("Searching", "Example Mobile"), ("Denied", "Example Mobile"),
-                                  ("futureState", "Example Mobile")] {
+        let cases: [(String, String, String?)] = [
+            ("Home", "Travel Mobile", "23410"), (" Roaming ", "Travel Mobile", "23410"),
+            ("Searching", "Example Mobile", nil), ("Denied", "Example Mobile", nil),
+            ("futureState", "Example Mobile", nil)
+        ]
+        for (state, carrier, code) in cases {
             let json = snapshot.replacingOccurrences(of: #""registrationState":"home""#,
                                                      with: #""registrationState":"\#(state)""#)
             let modem = try JSONDecoder().decode(Modem.self, from: Data(json.utf8))
-            XCTAssertEqual(modem.networkOverviewCarrier, expected, state)
+            XCTAssertEqual(modem.networkOverviewCarrier, carrier, state)
+            XCTAssertEqual(modem.cellularOperator?.code, code, state)
+            XCTAssertEqual(modem.simOperatorName, "Example Mobile", state)
         }
 
         let codeOnly = snapshot.replacingOccurrences(of: " Travel Mobile ", with: " ")
@@ -214,16 +221,20 @@ final class BackendAPITests: XCTestCase {
         let airplane = snapshot.replacingOccurrences(of: #""airplaneMode":false"#, with: #""airplaneMode":true"#)
         let offline = try JSONDecoder().decode(Modem.self, from: Data(airplane.utf8))
         XCTAssertEqual(offline.networkOverviewCarrier, "Example Mobile")
+        XCTAssertNil(offline.cellularOperator)
     }
 
     func testNullOptionalFieldsDecodeWithoutInventingStates() throws {
         let modem = try JSONDecoder().decode(Modem.self, from: Data(PreviewBackendServer.modemJSON().utf8))
         XCTAssertNil(modem.slots)
         XCTAssertEqual(modem.simKind, "euicc")
+        XCTAssertEqual(modem.mobileDataStatus, .connected)
         let unknown = PreviewBackendServer.modemJSON().replacingOccurrences(of: #""simKind":"euicc""#, with: #""simKind":"futureSIM""#)
             .replacingOccurrences(of: #""accessTechnology":"lte""#, with: #""accessTechnology":null"#)
+            .replacingOccurrences(of: #""internetConnected":true"#, with: #""internetConnected":null"#)
         let future = try JSONDecoder().decode(Modem.self, from: Data(unknown.utf8))
         XCTAssertNil(future.accessTechnology)
         XCTAssertEqual(future.simKind, "futureSIM")
+        XCTAssertEqual(future.mobileDataStatus, .unknown)
     }
 }

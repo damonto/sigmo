@@ -213,7 +213,7 @@ func responseFromProxy(proxy internetcore.ProxyStatus) Proxy {
 	}
 }
 
-func ResponseFromPublic(info internetcore.IPInfo) PublicResponse {
+func ResponseFromPublic(info internetcore.PublicIPInfo) PublicResponse {
 	return PublicResponse{
 		IP:           info.IP,
 		Country:      info.Country,

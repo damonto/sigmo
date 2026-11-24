@@ -195,18 +195,18 @@ func TestWiFiProxyTCPOnlyCheckKeepsTCPResult(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
-	tcp := checkWiFiProxyTCP(ctx, underlay, func(ctx context.Context, client *http.Client) (pinternet.IPInfo, error) {
+	tcp := checkWiFiProxyTCP(ctx, underlay, func(ctx context.Context, client *http.Client) (pinternet.PublicIPInfo, error) {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://echo.example/", nil)
 		if err != nil {
-			return pinternet.IPInfo{}, err
+			return pinternet.PublicIPInfo{}, err
 		}
 		resp, err := client.Do(request)
 		if err != nil {
-			return pinternet.IPInfo{}, err
+			return pinternet.PublicIPInfo{}, err
 		}
 		defer resp.Body.Close()
 		data, err := io.ReadAll(resp.Body)
-		return pinternet.IPInfo{IP: string(data)}, err
+		return pinternet.PublicIPInfo{IP: string(data)}, err
 	})
 	if tcp.ErrorCode != "" || tcp.IP.String() != "203.0.113.10" || tcp.ServerAddress == "" {
 		t.Fatalf("TCP result = %+v", tcp)
