@@ -40,15 +40,12 @@ struct ModemNetworkCard<SlotPicker: View>: View {
     }
 
     private var heading: some View {
-        Label {
-            Text("detail.networkStatus")
-                .accessibilityAddTraits(.isHeader)
-        } icon: {
+        HStack(spacing: 6) {
             Image(systemName: "waveform.path")
                 .foregroundStyle(iconTint)
-                .padding(6)
-                .background(accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
                 .accessibilityHidden(true)
+            Text("detail.networkStatus")
+                .accessibilityAddTraits(.isHeader)
         }
         .font(.headline)
     }

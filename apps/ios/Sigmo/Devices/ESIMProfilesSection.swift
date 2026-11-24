@@ -83,7 +83,10 @@ struct ESIMProfilesSection: View {
     }
 
     private func heading(subtitle: String? = nil) -> some View {
-        Label {
+        HStack(spacing: 6) {
+            Image(systemName: "simcard")
+                .foregroundStyle(iconTint)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("detail.profiles").font(.headline).accessibilityAddTraits(.isHeader)
                 if let subtitle {
@@ -92,10 +95,6 @@ struct ESIMProfilesSection: View {
                         .foregroundStyle(.secondary)
                 }
             }
-        } icon: {
-            Image(systemName: "simcard")
-                .foregroundStyle(iconTint)
-                .accessibilityHidden(true)
         }
         .frame(minHeight: 44)
     }

@@ -62,11 +62,10 @@ struct InternetTrafficCard: View {
     }
 
     private var title: some View {
-        Label {
-            Text("connection.internet")
-        } icon: {
+        HStack(spacing: 6) {
             Image(systemName: "globe")
                 .foregroundStyle(iconTint)
+            Text("connection.internet")
         }
         .font(.headline)
         .accessibilityElement(children: .ignore)
