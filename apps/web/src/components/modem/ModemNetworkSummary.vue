@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { Activity, Plane } from 'lucide-vue-next'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import ModemInternetTraffic from '@/components/modem/ModemInternetTraffic.vue'
@@ -98,7 +98,7 @@ const voiceServices = computed(
   >
     <div
       v-if="!connected"
-      class="pointer-events-none absolute -end-14 -top-18 -z-10 hidden size-48 place-items-center text-primary/12 lg:grid"
+      class="pointer-events-none absolute -inset-e-14 -top-18 -z-10 hidden size-48 place-items-center text-primary/12 lg:grid"
       aria-hidden="true"
     >
       <span class="col-start-1 row-start-1 size-16 rounded-full border border-current" />
