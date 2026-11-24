@@ -258,6 +258,13 @@ final class BackendFlowTests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["signal-00000000-0000-0000-0000-000000000001-device-1"].exists)
         XCTAssertFalse(app.images["volte-00000000-0000-0000-0000-000000000001-device-1"].exists)
         attachScreenshot(app)
+
+        app.buttons["modem-00000000-0000-0000-0000-000000000001-device-1"].tap()
+        let registration = app.descendants(matching: .any)["modemNetworkRegistration"].firstMatch
+        XCTAssertTrue(registration.waitForExistence(timeout: 5))
+        XCTAssertEqual(registration.label, "Airplane mode")
+        XCTAssertEqual(app.staticTexts["modemNetworkTitle"].label, "Example Mobile")
+        XCTAssertFalse(app.descendants(matching: .any)["signal-device-1"].exists)
     }
 
     func testLocalSearchAndConnectionTabsFilterTogether() {
@@ -333,7 +340,7 @@ final class BackendFlowTests: XCTestCase {
         }
     }
 
-    func testDeviceRowsShowCarrierNumberAndMetadata() throws {
+    func testDeviceCardsShowCarrierNumberAndMetadata() throws {
         let app = app(scenario: "cards")
         app.launch()
         let first = app.descendants(matching: .any)["modem-00000000-0000-0000-0000-000000000001-device-1"].firstMatch
@@ -347,18 +354,18 @@ final class BackendFlowTests: XCTestCase {
         let metadata = app.staticTexts["modemMetadata-\(identity)"]
         let signal = app.descendants(matching: .any)["signal-\(identity)"].firstMatch
         XCTAssertTrue(number.exists)
-        XCTAssertEqual(carrier.frame.midY, signal.frame.midY, accuracy: 5)
-        XCTAssertLessThan(carrier.frame.maxX, signal.frame.minX)
         XCTAssertGreaterThan(number.frame.minY, carrier.frame.minY)
         XCTAssertEqual(carrier.frame.minX, number.frame.minX, accuracy: 2)
         XCTAssertTrue(heading.exists)
         XCTAssertLessThanOrEqual(heading.frame.maxY, first.frame.minY)
         XCTAssertEqual(metadata.label, "Home Modem · eSIM")
         XCTAssertGreaterThan(metadata.frame.minY, number.frame.minY)
-        XCTAssertEqual(metadata.frame.minX, number.frame.minX, accuracy: 2)
-        XCTAssertLessThanOrEqual(first.frame.height, 120)
+        XCTAssertLessThan(metadata.frame.minX, number.frame.minX)
+        XCTAssertEqual(metadata.frame.midY, signal.frame.midY, accuracy: 5)
+        XCTAssertLessThanOrEqual(metadata.frame.maxX, signal.frame.minX)
+        XCTAssertLessThanOrEqual(first.frame.height, 128)
         XCTAssertEqual(app.staticTexts["modemNumber-00000000-0000-0000-0000-000000000001-device-2"].label, "No Number")
-        XCTAssertGreaterThan(second.frame.minY, first.frame.minY)
+        XCTAssertGreaterThanOrEqual(second.frame.minY, first.frame.maxY)
         XCTAssertEqual(first.frame.minX, second.frame.minX, accuracy: 2)
         XCTAssertGreaterThanOrEqual(first.frame.minX, app.frame.minX)
         XCTAssertLessThanOrEqual(second.frame.maxX, app.frame.maxX)

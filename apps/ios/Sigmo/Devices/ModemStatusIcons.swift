@@ -20,20 +20,21 @@ struct ModemStatusIcons: View {
                     .accessibilityLabel(Text("modem.wifiConnected"))
                     .accessibilityValue(Text("common.connected"))
             }
-            if !modem.airplaneMode, capabilities.contains("volte"), modem.volteStatus == .connected {
+            if capabilities.contains("volte"), modem.hasVoLTEConnection {
                 Image("ims-volte")
                     .resizable().scaledToFit()
                     .frame(width: iconSize * 1.4, height: iconSize)
                     .accessibilityLabel(Text("modem.volteConnected"))
                     .accessibilityIdentifier("volte-\(identity ?? modem.id)")
             }
-            if !modem.airplaneMode, let technology = modem.accessTechnology, !technology.isEmpty {
+            if let technology = modem.cellularTechnology {
+                let generation = Self.radioGlyph(technology)
                 // Radio generations use their familiar compact glyphs, without a text label or badge.
                 Group {
-                    if Self.radioGlyph(technology) == "?" {
+                    if generation == "?" {
                         Image(systemName: "questionmark")
                     } else {
-                        Image("radio-\(Self.radioGlyph(technology).lowercased())")
+                        Image("radio-\(generation.lowercased())")
                             .resizable().scaledToFit()
                             // Compensate for the PDF's transparent margins without enlarging the status row.
                             .scaleEffect(1.35)
@@ -56,11 +57,12 @@ struct ModemStatusIcons: View {
                     .accessibilityLabel(Text("modem.airplane"))
                     .accessibilityIdentifier("airplane-\(identity ?? modem.id)")
             } else {
-                Image(systemName: "cellularbars", variableValue: Double(modem.signalPercent) / 100)
+                let signal = modem.cellularSignalFraction
+                Image(systemName: "cellularbars", variableValue: signal ?? 0)
                     .symbolRenderingMode(.hierarchical)
                     .frame(width: iconSize + 6, height: iconSize)
                     .accessibilityLabel(Text("modem.signal"))
-                    .accessibilityValue("\(modem.signalPercent)%")
+                    .accessibilityValue(signal.map { Text($0, format: .percent) } ?? Text("common.unknown"))
                     .accessibilityIdentifier("signal-\(identity ?? modem.id)")
             }
         }

@@ -29,14 +29,10 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTFail("Cannot reach element: \(element)\n\(app.debugDescription)")
     }
     private func tapOverviewRow(_ element: XCUIElement, in app: XCUIApplication) {
-        let bar = app.descendants(matching: .any)["esimNetworkBar"].firstMatch
-        guard bar.waitForExistence(timeout: 5) else {
-            XCTFail("Missing eSIM network bar")
-            return
-        }
+        let compactBar = app.descendants(matching: .any)["esimCompactNetworkBar"].firstMatch
         for _ in 0..<12 {
             let frame = app.frame
-            let top = bar.frame.maxY + 8
+            let top = (compactBar.exists ? compactBar.frame.maxY : app.navigationBars.firstMatch.frame.maxY) + 8
             let bottom = app.tabBars.firstMatch.frame.minY - 8
             let viewport = CGRect(x: frame.minX, y: top, width: frame.width, height: bottom - top)
             guard viewport.height >= 44 else {
@@ -46,7 +42,7 @@ final class ModemDetailFlowTests: XCTestCase {
             let rowFrame = element.waitForExistence(timeout: 1) ? element.frame : .null
             if !rowFrame.isEmpty {
                 let visible = rowFrame.intersection(viewport)
-                if element.isHittable, !visible.isNull, visible.height >= 44 {
+                if !visible.isNull, visible.height >= 44 {
                     let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: element)
                     XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
                     app.coordinate(withNormalizedOffset: CGVector(
@@ -56,14 +52,16 @@ final class ModemDetailFlowTests: XCTestCase {
                     return
                 }
             }
-            // Keep gestures inside the list; dragging on the fixed bar cannot scroll it.
-            // A row without a layout frame does not establish a scroll direction.
-            let down = !rowFrame.isEmpty && rowFrame.midY < top
-            let startY = top + viewport.height * (down ? 0.25 : 0.75)
-            let endY = top + viewport.height * (down ? 0.75 : 0.25)
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (startY - frame.minY) / frame.height))
-            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (endY - frame.minY) / frame.height))
-            start.press(forDuration: 0.1, thenDragTo: end)
+            // Keep gestures below the compact bar when it overlays the list.
+            // Brake before release so large rows don't fling past the available viewport.
+            let down = !rowFrame.isEmpty && rowFrame.midY < viewport.midY
+            let distance = viewport.height * 0.25
+            let startY = viewport.midY + (down ? -distance : distance)
+            let endY = viewport.midY + (down ? distance : -distance)
+            // Drag through the gutter so the EID's context menu cannot intercept the gesture.
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: (startY - frame.minY) / frame.height))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: (endY - frame.minY) / frame.height))
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.15)
         }
         XCTFail("Cannot reach overview row: \(element)\n\(app.debugDescription)")
     }
@@ -334,14 +332,53 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertEqual(app.staticTexts["seStorage-se-a"].value as? String, "64KiB")
     }
 
-    func testSignalBarsRemainVisibleInGlass() throws {
-        let app = launch()
+    func testInternetTrafficCardShowsLiveRatesAndUsesCarrierIconTint() throws {
+        let app = launch("detail-traffic")
+        let card = app.descendants(matching: .any)["internetTrafficCard"].firstMatch
+        let networkCard = app.descendants(matching: .any)["esimNetworkBar"].firstMatch
+        let download = app.descendants(matching: .any)["internetTrafficDownload"].firstMatch
+        let upload = app.descendants(matching: .any)["internetTrafficUpload"].firstMatch
+        let usage = app.descendants(matching: .any)["internetTrafficUsage"].firstMatch
+        let heading = card.descendants(matching: .any)["internetTrafficHeading"].firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(card.frame.minY, networkCard.frame.maxY)
+        XCTAssertEqual(heading.label, "Internet")
+        let sampled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == '200 kb/s'"), object: upload)
+        XCTAssertEqual(XCTWaiter.wait(for: [sampled], timeout: 5), .completed)
+        XCTAssertTrue(["1 Mb/s", "2 Mb/s"].contains(download.value as? String ?? ""))
+        XCTAssertNotEqual(usage.value as? String, "Unknown")
+        XCTAssertTrue(app.staticTexts["Last 30 seconds"].exists)
+        try assertTint(heading, red: true, minimumCoverage: 0.01)
+        screenshot(app, name: "Live Internet traffic")
+    }
+
+    func testNetworkCardTitlesRegisteredOperatorAndFollowsTheActiveSIMLogo() throws {
+        let app = launch("detail-roaming")
+        let registration = app.descendants(matching: .any)["modemNetworkRegistration"].firstMatch
+        let title = app.staticTexts["modemNetworkTitle"]
+        XCTAssertTrue(registration.waitForExistence(timeout: 5))
+        XCTAssertEqual(registration.label, "Roaming")
+        XCTAssertEqual(title.label, "Travel Mobile")
         let signal = app.descendants(matching: .any)["signal-device-1"].firstMatch
         XCTAssertTrue(signal.waitForExistence(timeout: 5))
         XCTAssertEqual(signal.value as? String, "78%")
-        let image = try XCTUnwrap(signal.screenshot().image.cgImage)
+        try assertTint(signal, red: true)
+        screenshot(app, name: "Roaming network card with red logo")
+
+        let picker = app.buttons["simSlotPicker"]
+        picker.tap()
+        tap(app.buttons["simSlot-2"], in: app)
+        tap(app.alerts.buttons["confirmDetailAction"].firstMatch, in: app)
+        let switched = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'SIM 2' AND enabled == true"), object: picker)
+        XCTAssertEqual(XCTWaiter.wait(for: [switched], timeout: 10), .completed)
+        try assertTint(signal, red: false)
+        screenshot(app, name: "Roaming network card with white logo")
+    }
+
+    private func assertTint(_ element: XCUIElement, red: Bool, minimumCoverage: Double = 0.1) throws {
+        let image = try XCTUnwrap(element.screenshot().image.cgImage)
         var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
-        let darkPixels = try pixels.withUnsafeMutableBytes { buffer in
+        let tintedPixels = try pixels.withUnsafeMutableBytes { buffer in
             let context = try XCTUnwrap(CGContext(
                 data: buffer.baseAddress, width: image.width, height: image.height,
                 bitsPerComponent: 8, bytesPerRow: image.width * 4,
@@ -351,14 +388,17 @@ final class ModemDetailFlowTests: XCTestCase {
             context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
             var count = 0
             for offset in stride(from: 0, to: buffer.count, by: 4) {
-                if buffer[offset] < 100 && buffer[offset + 1] < 100 && buffer[offset + 2] < 100 && buffer[offset + 3] > 200 {
-                    count += 1
-                }
+                guard buffer[offset + 3] > 200 else { continue }
+                let matches = red
+                    ? buffer[offset] > 95 && buffer[offset + 1] < 90 && buffer[offset + 2] < 90
+                    : buffer[offset] < 120 && buffer[offset + 1] < 110 && buffer[offset + 2] > 140
+                if matches { count += 1 }
             }
             return count
         }
-        screenshot(app, name: "Signal and SE heading contrast")
-        XCTAssertGreaterThan(darkPixels, image.width * image.height / 10, "78% signal must render filled bars, not an all-gray icon")
+        let expectedColor = red ? "the logo's red" : "the default violet"
+        XCTAssertGreaterThan(Double(tintedPixels) / Double(image.width * image.height), minimumCoverage,
+                             "\(element.label) should use \(expectedColor)")
     }
 
     func testSecureElementMetadataAndCopy() {
@@ -395,27 +435,33 @@ final class ModemDetailFlowTests: XCTestCase {
         screenshot(app, name: "SE metadata below headings")
     }
 
-    func testNetworkBarStaysFixedWhileScrolling() {
+    func testNetworkCardCollapsesWhileScrollingAndKeepsSlotPicker() {
         for chinese in [false, true] {
-            let app = launch(chinese: chinese, large: true, dark: chinese)
-            let eid = app.buttons["seEID-se-a"]
-            XCTAssertTrue(eid.waitForExistence(timeout: 5))
-            let bar = app.descendants(matching: .any)["esimNetworkBar"].firstMatch
-            XCTAssertTrue(bar.exists)
-            let original = bar.frame
-            let eidY = eid.frame.minY
-            screenshot(app, name: "Large text fixed network bar \(chinese)")
-            app.swipeUp()
-            XCTAssertEqual(bar.frame.minY, original.minY, accuracy: 1)
-            XCTAssertEqual(bar.frame.height, original.height, accuracy: 1)
-            XCTAssertTrue(!eid.isHittable || eid.frame.minY < eidY)
+            let app = launch("detail-roaming", chinese: chinese, large: true, dark: chinese)
+            let compactBar = app.descendants(matching: .any)["esimCompactNetworkBar"].firstMatch
+            let registration = app.descendants(matching: .any)["modemNetworkRegistration"].firstMatch
+            XCTAssertTrue(registration.waitForExistence(timeout: 5))
+            XCTAssertFalse(compactBar.exists)
+            screenshot(app, name: "Large text network card \(chinese)")
+            for _ in 0..<4 where !compactBar.exists { app.swipeUp() }
+            XCTAssertTrue(compactBar.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(compactBar.staticTexts["Travel Mobile"].exists)
+            XCTAssertLessThan(compactBar.frame.height, app.frame.height / 2)
             // The glass bar's menu wrapper can report false for isHittable; verify the actual interaction.
-            let slotPicker = app.buttons["simSlotPicker"]
+            let slotPicker = compactBar.buttons["simSlotPicker"].firstMatch
+            XCTAssertTrue(slotPicker.exists, app.debugDescription)
             slotPicker.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             XCTAssertTrue(app.buttons["simSlot-2"].waitForExistence(timeout: 5), app.debugDescription)
             app.buttons["simSlot-2"].tap()
             app.alerts.buttons[chinese ? "取消" : "Cancel"].tap()
-            screenshot(app, name: "Fixed network bar after scrolling \(chinese)")
+            screenshot(app, name: "Compact network bar after scrolling \(chinese)")
+            for _ in 0..<4 where compactBar.exists {
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.58))
+                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.84))
+                start.press(forDuration: 0.1, thenDragTo: end)
+            }
+            XCTAssertTrue(compactBar.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(registration.waitForExistence(timeout: 5))
             openActions(app, profile: "se-a:8986000000000000001")
             app.navigationBars.buttons.element(boundBy: 0).tap()
             tapOverviewRow(app.buttons["addESIM-se-a"], in: app)
@@ -1242,7 +1288,7 @@ final class ModemDetailFlowTests: XCTestCase {
         let top = bar.frame.maxY + 20
         let bottom = app.tabBars.firstMatch.frame.minY - 20
         XCTAssertGreaterThan(bottom - top, 100)
-        // Pull within the list; the fixed network bar does not forward scrolling.
+        // Start the refresh gesture below the expanded network card.
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (top - frame.minY) / frame.height))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (bottom - frame.minY) / frame.height))
         start.press(forDuration: 0.1, thenDragTo: end)

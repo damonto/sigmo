@@ -1,19 +1,79 @@
 import XCTest
+import UIKit
 @testable import Sigmo
 
 @MainActor
 final class CarrierLogoTests: XCTestCase {
     func testPLMNValidationPreservesLeadingZeroes() {
-        XCTAssertEqual(CarrierLogo.url(plmn: "310070")?.absoluteString, "https://sigmo.952007.xyz/logo/310070")
+        XCTAssertEqual(CarrierLogoArtwork.catalogURL(plmn: "310070")?.absoluteString, "https://sigmo.952007.xyz/logo/310070")
         XCTAssertEqual(ESIMOwner(mcc: "310", mnc: "070", gid1: nil, gid2: nil).plmn, "310070")
         XCTAssertEqual(ESIMOwner(mcc: "310", mnc: "70", gid1: nil, gid2: nil).plmn, "31070")
         for plmn in ["", "310-070", "3107", "3100700", "../logo", "３１００７０"] {
-            XCTAssertNil(CarrierLogo.url(plmn: plmn), plmn)
+            XCTAssertNil(CarrierLogoArtwork.catalogURL(plmn: plmn), plmn)
         }
         XCTAssertNil(ESIMOwner(mcc: "31", mnc: "0070", gid1: nil, gid2: nil).plmn)
-        XCTAssertNil(CarrierLogo.embeddedImage("data:image/png;base64,broken"))
-        XCTAssertNil(CarrierLogo.embeddedImage("https://example.test/image.png"))
-        XCTAssertNotNil(CarrierLogo.embeddedImage("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"))
+    }
+
+    func testEmbeddedArtworkIsDownsampledAndTintIsOptional() async throws {
+        let size = CGSize(width: 1024, height: 256)
+        let logo = renderLogo(size: size) { context in
+            context.setFillColor(UIColor.blue.cgColor)
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+        let data = try XCTUnwrap(logo.pngData())
+        let source = CarrierLogoArtwork.Source(icon: "data:image/png;base64,\(data.base64EncodedString())", catalogURL: nil)
+
+        let plainArtwork = await source.load(samplesTint: false)
+        let plain = try XCTUnwrap(plainArtwork)
+        XCTAssertLessThanOrEqual(plain.image.width, 384)
+        XCTAssertEqual(plain.image.width, plain.image.height * 4)
+        XCTAssertNil(plain.tint)
+
+        let tintedArtwork = await source.load(samplesTint: true)
+        XCTAssertNotNil(tintedArtwork?.tint)
+    }
+
+    func testInvalidEmbeddedArtworkFallsBack() async {
+        for icon in ["data:image/png;base64,broken", "https://example.test/image.png"] {
+            let source = CarrierLogoArtwork.Source(icon: icon, catalogURL: nil)
+            let artwork = await source.load(samplesTint: true)
+            XCTAssertNil(artwork, icon)
+        }
+    }
+
+    func testDominantColorSelectsBrandHueOverWhiteBacking() throws {
+        let logo = renderLogo { context in
+            context.setFillColor(UIColor.white.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+            context.setFillColor(UIColor.blue.cgColor)
+            context.fill(CGRect(x: 4, y: 10, width: 15, height: 12))
+            context.setFillColor(UIColor.red.cgColor)
+            context.fill(CGRect(x: 21, y: 10, width: 7, height: 12))
+        }
+        let bitmap = try XCTUnwrap(logo.cgImage)
+        let tint = try XCTUnwrap(CarrierLogoArtwork.dominantColor(in: bitmap))
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0
+        XCTAssertTrue(UIColor(cgColor: tint).getRed(&red, green: &green, blue: &blue, alpha: nil))
+        XCTAssertEqual(red, 0, accuracy: 0.05)
+        XCTAssertEqual(green, 0, accuracy: 0.05)
+        XCTAssertEqual(blue, 1, accuracy: 0.05)
+    }
+
+    func testDominantColorIgnoresFaintAndMonochromePixels() throws {
+        let logo = renderLogo { context in
+            context.setFillColor(UIColor.red.withAlphaComponent(0.1).cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: 16, height: 32))
+            context.setFillColor(UIColor.darkGray.cgColor)
+            context.fill(CGRect(x: 16, y: 0, width: 16, height: 32))
+        }
+        let bitmap = try XCTUnwrap(logo.cgImage)
+        XCTAssertNil(CarrierLogoArtwork.dominantColor(in: bitmap))
+    }
+
+    private func renderLogo(size: CGSize = CGSize(width: 32, height: 32), _ draw: (CGContext) -> Void) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { draw($0.cgContext) }
     }
 
     func testHomeUsesOverviewIconWithoutProfileRequests() async throws {

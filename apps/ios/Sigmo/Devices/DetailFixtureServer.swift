@@ -47,6 +47,7 @@ actor DetailFixtureServer {
     enum Scenario {
         case standard, delayedProfiles, unavailableProfiles, singleHardware, notifications, delayedDiscoveries, noDiscoveries, unavailableDiscoveries, emptyProfiles
         case delayedDeletion, deletionFailure, profileRefresh
+        case networkCardBranding
         case delayedActivation, activationFailure
         case mixedTransferProfiles, unsupportedTransferProfiles, peerApprovals
         case delayedSettings, unavailableSettings, unsupportedSettings, settingsWriteFailure
@@ -557,11 +558,21 @@ actor DetailFixtureServer {
         let connection = currentConnections(id)
         let defaultName = modemNames[id] ?? (id == "device-1" ? "Home Modem" : "Source Modem")
         let profileICCID = groups.first { $0.id == activeSE }?.profiles.first { $0.enabled }?.iccid ?? "8986000000000000001"
-        let sim = SIMSlot(slot: slot, active: true, operatorName: "Example Mobile", operatorIdentifier: "46000", regionCode: "CN", identifier: slot == 1 ? profileICCID : "8986000000000000099", reminder: physicalReminder)
+        let icon = scenario == .networkCardBranding ? Self.networkCardLogo(slot: slot) : nil
+        let sim = SIMSlot(slot: slot, active: true, operatorName: "Example Mobile", operatorIdentifier: "46000", regionCode: "CN", identifier: slot == 1 ? profileICCID : "8986000000000000099", icon: icon, reminder: physicalReminder)
         let slots = [SIMSlot(slot: 1, active: slot == 1, operatorName: "Example Mobile", operatorIdentifier: "46000", regionCode: "CN", identifier: "8986000000000000001"), SIMSlot(slot: 2, active: slot == 2, operatorName: "Travel", operatorIdentifier: "23410", regionCode: "GB", identifier: "8986000000000000099")]
         return Modem(id: id, name: settings.device.alias.isEmpty ? defaultName : settings.device.alias, manufacturer: "Quectel", primaryPort: "/dev/cdc-wdm0", firmwareRevision: "1.0", hardwareRevision: "1", number: number, state: locked ? "locked" : "registered", unlockRequired: locked ? "sim-pin" : "none", unlockSupported: locked, sim: sim,
                      slots: scenario == .singleHardware ? Array(slots.prefix(1)) : slots, accessTechnology: settings.airplaneEnabled ? nil : "lte", registrationState: settings.airplaneEnabled ? "" : connection.registrationState, registeredOperator: connection.registeredOperator, signalQuality: settings.airplaneEnabled ? 0 : 78, airplaneMode: settings.airplaneEnabled, simKind: physical ? "physical" : "euicc", internetConnected: connection.internet.connected && !settings.airplaneEnabled, wifiCallingEnabled: connection.wifi.enabled, wifiCallingConnected: connection.wifi.connected, volteEnabled: connection.volte.enabled, volteConnected: connection.volte.connected && !settings.airplaneEnabled)
     }
+
+    private static func networkCardLogo(slot: Int) -> String {
+        // The first slot has a red logo and the second has a white logo.
+        let png = slot == 1
+            ? "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+            : "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"
+        return "data:image/png;base64,\(png)"
+    }
+
     private func profileLocation(_ parts: [String]) -> (Int, Int)? {
         guard let si = parts.firstIndex(of: "secure-elements"), parts.indices.contains(si + 1),
               let pi = parts.firstIndex(of: "esim-profiles"), parts.indices.contains(pi + 1),

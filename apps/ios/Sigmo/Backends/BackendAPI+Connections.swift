@@ -22,6 +22,10 @@ extension BackendAPI {
         try await readInternet(["modems", modem, "internet-connections", "current"], token: token, timeout: .hardware)
     }
 
+    func internetTraffic(_ modem: String, token: String?) async throws -> InternetTrafficResponse {
+        try await decode(["modems", modem, "internet-connections", "current", "traffic"], token: token, timeout: .traffic)
+    }
+
     func connectInternet(_ modem: String, preferences: InternetPreferences, token: String?) async throws -> DetailInternet {
         try await decode(["modems", modem, "internet-connections"], method: "POST",
                          body: JSONEncoder().encode(preferences.submission), token: token, timeout: .hardware)

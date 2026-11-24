@@ -574,6 +574,13 @@
 "detail.simApplication" = "SIM Applications";
 "detail.simApplicationUnavailable" = "SIM application is unavailable";
 "detail.simLocked" = "SIM is locked";
+"detail.networkStatus" = "Network status";
+"detail.networkNotRegistered" = "Not registered";
+"detail.trafficDownload" = "Download";
+"detail.trafficUpload" = "Upload";
+"detail.trafficUsage" = "This connection";
+"detail.trafficWindow" = "Last 30 seconds";
+"detail.trafficIdle" = "Idle";
 "detail.smdp" = "SM-DP+ Address";
 "detail.sourceDeletion" = "Delete the source profile to continue?";
 "detail.sourceIMEI" = "Source IMEI";

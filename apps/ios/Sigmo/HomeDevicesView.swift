@@ -132,11 +132,14 @@ struct HomeDevicesView: View {
                     if let devices = groups[session.id] {
                         Section {
                             ForEach(devices) { device in
-                                deviceRow(device)
+                                deviceCard(device)
                             }
                         } header: {
                             Text(session.configuration.name)
-                                .listRowInsets(.top, 0)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .textCase(nil)
+                                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
                                 .accessibilityIdentifier("backendHeading-\(session.id)")
                         }
                     }
@@ -144,6 +147,8 @@ struct HomeDevicesView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
+        .scrollContentBackground(.hidden)
         .contentMargins(.top, 0, for: .scrollContent)
         .scrollDismissesKeyboard(.interactively)
         .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "home.search")
@@ -151,22 +156,16 @@ struct HomeDevicesView: View {
         .autocorrectionDisabled()
     }
 
-    private func deviceRow(_ device: HomeDevice) -> some View {
+    private func deviceCard(_ device: HomeDevice) -> some View {
         Button { open(device.id) } label: {
-            HStack(spacing: 8) {
-                ModemRow(modem: device.modem, capabilities: device.session.capabilities ?? [],
-                         backendID: device.session.id,
-                         unreadCount: device.session.unreadCounts[device.modem.id] ?? 0)
-                Image(systemName: "chevron.forward")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-            }
-            .contentShape(Rectangle())
+            ModemCard(modem: device.modem, capabilities: device.session.capabilities ?? [],
+                      backendID: device.session.id,
+                      unreadCount: device.session.unreadCounts[device.modem.id] ?? 0)
         }
         .buttonStyle(.plain)
-        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-        .alignmentGuide(.listRowSeparatorLeading) { _ in 52 }
+        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
         .accessibilityIdentifier("modem-\(device.session.id)-\(device.modem.id)")
     }
 }

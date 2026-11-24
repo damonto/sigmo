@@ -574,6 +574,13 @@
 "detail.simApplication" = "SIM 应用程序";
 "detail.simApplicationUnavailable" = "SIM 应用不可用";
 "detail.simLocked" = "SIM 已锁定";
+"detail.networkStatus" = "网络状态";
+"detail.networkNotRegistered" = "未注册";
+"detail.trafficDownload" = "下载";
+"detail.trafficUpload" = "上传";
+"detail.trafficUsage" = "本次连接已用";
+"detail.trafficWindow" = "最近 30 秒";
+"detail.trafficIdle" = "空闲";
 "detail.smdp" = "SM-DP+ 地址";
 "detail.sourceDeletion" = "删除来源配置以继续？";
 "detail.sourceIMEI" = "来源 IMEI";

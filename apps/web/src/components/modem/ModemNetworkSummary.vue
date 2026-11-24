@@ -33,6 +33,9 @@ const simOperator = computed(() => {
 })
 
 const registrationState = computed(() => props.modem.registrationState.trim().toLowerCase())
+const isSearching = computed(
+  () => !props.modem.airplaneMode && registrationState.value === 'searching',
+)
 const registeredNetwork = computed(() => {
   if (props.modem.airplaneMode || !['home', 'roaming'].includes(registrationState.value)) {
     return formatOperator('', '')
@@ -99,6 +102,7 @@ const voiceServices = computed(
     <div
       v-if="!connected"
       class="pointer-events-none absolute -inset-e-14 -top-18 -z-10 hidden size-48 place-items-center text-primary/12 lg:grid"
+      :class="{ 'searching-rings': isSearching }"
       aria-hidden="true"
     >
       <span class="col-start-1 row-start-1 size-16 rounded-full border border-current" />
@@ -201,3 +205,26 @@ const voiceServices = computed(
     />
   </div>
 </template>
+
+<style scoped>
+@media (prefers-reduced-motion: no-preference) {
+  .searching-rings > span {
+    animation: search-ring-pulse 3s ease-in-out infinite;
+  }
+
+  .searching-rings > span:nth-child(2) {
+    animation-delay: 180ms;
+  }
+
+  .searching-rings > span:nth-child(3) {
+    animation-delay: 360ms;
+  }
+
+  @keyframes search-ring-pulse {
+    50% {
+      opacity: 0.45;
+      transform: scale(1.12);
+    }
+  }
+}
+</style>

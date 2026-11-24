@@ -16,9 +16,19 @@ struct SIMSlot: Codable, Identifiable, Sendable, Equatable {
 struct RegisteredOperator: Codable, Sendable, Equatable {
     let name: String
     let code: String
+
+    var displayName: String? {
+        [name, code].lazy
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
 }
 
 struct Modem: Codable, Identifiable, Sendable, Equatable {
+    enum CellularRegistration: String {
+        case home, roaming, searching, denied, idle, unknown
+    }
+
     let id: String
     let name: String
     let manufacturer: String
@@ -55,7 +65,35 @@ struct Modem: Codable, Identifiable, Sendable, Equatable {
     var carrier: String {
         registeredOperator.name.isEmpty ? sim.operatorName : registeredOperator.name
     }
+
+    var cellularRegistration: CellularRegistration {
+        let state = registrationState.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return CellularRegistration(rawValue: state) ?? .unknown
+    }
+
+    var networkOverviewCarrier: String? {
+        let registration = cellularRegistration
+        if !airplaneMode, registration == .home || registration == .roaming,
+           let name = registeredOperator.displayName { return name }
+        return [sim.operatorName, sim.operatorIdentifier].lazy
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
+
     var signalPercent: Int { min(100, max(0, signalQuality)) }
+
+    var cellularSignalFraction: Double? {
+        guard !airplaneMode, signalPercent > 0 else { return nil }
+        return Double(signalPercent) / 100
+    }
+
+    var cellularTechnology: String? {
+        guard !airplaneMode, let technology = accessTechnology?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !technology.isEmpty else { return nil }
+        return technology
+    }
+
+    var hasVoLTEConnection: Bool { !airplaneMode && volteStatus == .connected }
 }
 
 // Both IMS services use the same presentation without guessing omitted API values.

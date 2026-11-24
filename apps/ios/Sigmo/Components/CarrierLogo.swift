@@ -8,45 +8,60 @@ struct CarrierLogo: View {
     var name = ""
     var size: CGFloat = 32
 
-    static func embeddedImage(_ icon: String?) -> UIImage? {
-        guard let icon, icon.hasPrefix("data:image/"), let comma = icon.firstIndex(of: ","),
-              icon[..<comma].hasSuffix(";base64"),
-              let data = Data(base64Encoded: String(icon[icon.index(after: comma)...])) else { return nil }
-        return UIImage(data: data)
-    }
-
-    nonisolated static func url(plmn: String?) -> URL? {
-        guard let plmn, (5...6).contains(plmn.utf8.count),
-              plmn.utf8.allSatisfy({ (48...57).contains($0) }) else { return nil }
-        return URL(string: "https://sigmo.952007.xyz/logo/\(plmn)")
-    }
-
     var body: some View {
-        Group {
-            if let bitmap = Self.embeddedImage(icon) {
-                Image(uiImage: bitmap).resizable().scaledToFit()
-                    .frame(width: size, height: size)
-            } else if !AppLaunch.usesFixtures, let url = Self.url(plmn: plmn) {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFit()
-                            .frame(width: size, height: size)
-                    } else { flag }
-                }
-                .id(url)
-            } else {
-                flag
-            }
-        }
-        .frame(width: size, height: size)
-        .background(Color(uiColor: .tertiarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: size / 4, style: .continuous))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(name)
-        .accessibilityHidden(name.isEmpty)
+        render(samplesTint: false) { tile, _ in tile }
     }
 
-    private var flag: some View {
-        RegionFlag(regionCode: regionCode, size: size, background: .clear)
+    func withTint<Content: View>(@ViewBuilder _ content: @escaping (Tile, Color?) -> Content) -> some View {
+        render(samplesTint: true, content)
+    }
+
+    private func render<Content: View>(samplesTint: Bool, @ViewBuilder _ content: @escaping (Tile, Color?) -> Content) -> some View {
+        let url = AppLaunch.usesFixtures ? nil : CarrierLogoArtwork.catalogURL(plmn: plmn)
+        return ArtworkView(source: .init(icon: icon, catalogURL: url), samplesTint: samplesTint) { artwork in
+            let tile = Tile(image: artwork?.image, regionCode: regionCode, name: name, size: size)
+            content(tile, artwork?.tint.map(Color.init(cgColor:)))
+        }
+    }
+
+    struct Tile: View {
+        let image: CGImage?
+        let regionCode: String
+        let name: String
+        let size: CGFloat
+
+        var body: some View {
+            Group {
+                if let image {
+                    Image(decorative: image, scale: 1).resizable().scaledToFit()
+                } else {
+                    RegionFlag(regionCode: regionCode, size: size, background: .clear)
+                }
+            }
+            .frame(width: size, height: size)
+            .background(Color(uiColor: .tertiarySystemGroupedBackground))
+            .clipShape(.rect(cornerRadius: size / 4))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(name)
+            .accessibilityHidden(name.isEmpty)
+        }
+    }
+
+    private struct ArtworkView<Content: View>: View {
+        let source: CarrierLogoArtwork.Source
+        let samplesTint: Bool
+        @ViewBuilder let content: (CarrierLogoArtwork?) -> Content
+        @State private var resolved: (source: CarrierLogoArtwork.Source, artwork: CarrierLogoArtwork)?
+
+        var body: some View {
+            // A SIM change invalidates both the badge and the tint immediately.
+            content(resolved?.source == source ? resolved?.artwork : nil)
+                .task(id: source) {
+                    guard resolved?.source != source, !Task.isCancelled else { return }
+                    resolved = nil
+                    guard let artwork = await source.load(samplesTint: samplesTint), !Task.isCancelled else { return }
+                    resolved = (source, artwork)
+                }
+        }
     }
 }

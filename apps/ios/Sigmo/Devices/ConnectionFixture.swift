@@ -70,11 +70,15 @@ struct ConnectionFixture: Sendable {
             var current = internet
             if airplane { current.connected = false }
             return try reply(current)
+        case ("GET", "/internet-connections/current/traffic"):
+            guard internet.trafficEnabled else { return error("resource_not_found", status: 404) }
+            return try reply(internet.nextTrafficSample(airplane: airplane))
         case ("POST", "/internet-connections"):
             if airplane { return error("internet_airplane_mode", status: 409) }
             internet.preferences = try JSONDecoder().decode(InternetPreferences.self, from: data)
             internet.connected = true
             internet.bearer += 1
+            internet.resetTraffic()
             try interruptWriteIfNeeded()
             return try reply(internet, status: 201)
         case ("DELETE", "/internet-connections/current"):
@@ -221,6 +225,26 @@ struct ConnectionFixtureInternet: Encodable, Sendable {
                                           defaultRoute: false, proxyEnabled: true, alwaysOn: true)
     var connected = true
     var bearer: UInt64 = 1
+    var trafficEnabled = false
+    private var elapsed: UInt64 = 0
+    private var received: UInt64 = 8_192
+    private var sent: UInt64 = 4_096
+
+    mutating func resetTraffic() {
+        elapsed = 0
+        received = 8_192
+        sent = 4_096
+    }
+
+    mutating func nextTrafficSample(airplane: Bool) -> InternetTrafficResponse {
+        guard connected, !airplane else { return .init(connected: false, sample: nil) }
+        let counter = InternetTrafficSample(sessionID: String(bearer), elapsedMilliseconds: elapsed,
+                                            rxBytes: received, txBytes: sent)
+        received += elapsed.isMultiple(of: 3_000) ? 250_000 : 125_000
+        sent += 25_000
+        elapsed += 1_000
+        return .init(connected: true, sample: counter)
+    }
 
     private enum CodingKeys: String, CodingKey {
         case status, proxy, interfaceName, bearer, ipv4Addresses, ipv6Addresses, dns, durationSeconds, txBytes, rxBytes, routeMetric

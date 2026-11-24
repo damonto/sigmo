@@ -3,6 +3,113 @@ import XCTest
 
 @MainActor
 final class ModemDetailTests: XCTestCase {
+    func testInternetTrafficUsesSessionTimeAndKeepsThirtySeconds() {
+        var history = InternetTrafficHistory()
+        history.append(trafficSample(at: 500, received: 1_000, sent: 200))
+        XCTAssertNil(history.rates)
+        XCTAssertEqual(history.usedBytes, 1_200)
+
+        history.append(trafficSample(at: 2_500, received: 3_000, sent: 700))
+        XCTAssertEqual(history.rates, .init(download: 8_000, upload: 2_000))
+        XCTAssertEqual(history.points.last?.bitsPerSecond, 10_000)
+        history.append(trafficSample(at: 2_000, received: 100, sent: 100))
+        XCTAssertEqual(history.usedBytes, 3_700)
+
+        history.missSample()
+        XCTAssertNil(history.rates)
+        history.append(trafficSample(at: 30_000, received: 3_000, sent: 700))
+        XCTAssertEqual(history.rates, .init(download: 0, upload: 0))
+        history.append(trafficSample(at: 33_000, received: 6_000, sent: 700))
+        XCTAssertEqual(history.points.map(\.elapsedMilliseconds), [30_000, 33_000])
+    }
+
+    func testInternetTrafficResetsOnSessionCounterAndSampleChanges() {
+        var history = InternetTrafficHistory()
+        history.append(trafficSample(at: 1_000, received: 10, sent: 20))
+        history.append(trafficSample(at: 2_000, received: 100, sent: 200))
+        XCTAssertNotNil(history.rates)
+
+        history.append(trafficSample(at: 500, received: 30, sent: 40, session: "next"))
+        XCTAssertNil(history.rates)
+        XCTAssertTrue(history.points.isEmpty)
+        XCTAssertEqual(history.usedBytes, 70)
+
+        history.append(trafficSample(at: 1_500, received: 29, sent: 80, session: "next"))
+        XCTAssertNil(history.rates)
+        XCTAssertEqual(history.usedBytes, 109)
+        history.append(trafficSample(at: 32_000, received: .max, sent: 90, session: "next"))
+        XCTAssertNil(history.rates)
+        XCTAssertEqual(history.usedBytes, .max)
+
+        history.append(nil)
+        XCTAssertNil(history.usedBytes)
+        XCTAssertTrue(history.points.isEmpty)
+    }
+
+    func testInternetTrafficObserverHidesDisconnectedSession() async throws {
+        var fixture = ConnectionFixture()
+        fixture.internet.trafficEnabled = true
+        let server = DetailFixtureServer(initialConnection: fixture)
+        let detail = try await make(server)
+        let traffic = InternetTrafficState()
+        let task = Task { await traffic.observe(detail, target: detail.simTarget) }
+
+        do {
+            try await wait { traffic.history.rates?.upload == 200_000 }
+            XCTAssertEqual(traffic.connectedTarget, detail.simTarget)
+            XCTAssertNotNil(traffic.history.usedBytes)
+            fixture.internet.connected = false
+            await server.setConnectionFixture(fixture)
+            try await wait { traffic.connectedTarget == nil }
+            XCTAssertNil(traffic.history.usedBytes)
+            XCTAssertTrue(traffic.history.points.isEmpty)
+            let requests = await server.allRequests().filter {
+                $0.url?.path.hasSuffix("/modems/device-1/internet-connections/current/traffic") == true
+            }
+            XCTAssertGreaterThanOrEqual(requests.count, 3)
+            XCTAssertTrue(requests.allSatisfy { $0.httpMethod == "GET" && $0.timeoutInterval == 3 })
+        } catch {
+            task.cancel()
+            await task.value
+            throw error
+        }
+        task.cancel()
+        await task.value
+    }
+
+    func testSupersededTrafficObserverStopsBeforeItsNextRequest() async throws {
+        var fixture = ConnectionFixture()
+        fixture.internet.trafficEnabled = true
+        let server = DetailFixtureServer(initialConnection: fixture)
+        let detail = try await make(server)
+        let target = detail.simTarget
+        let traffic = InternetTrafficState()
+        let first = Task { await traffic.observe(detail, target: target) }
+
+        do {
+            try await wait { traffic.connectedTarget == target }
+        } catch {
+            first.cancel()
+            await first.value
+            throw error
+        }
+        let path = "/internet-connections/current/traffic"
+        await server.holdNext(path)
+        let replacement = Task { await traffic.observe(detail, target: target) }
+        await server.waitForHeldRequest()
+        await first.value
+        let requests = await server.allRequests().filter { $0.url?.path.hasSuffix(path) == true }
+        replacement.cancel()
+        await server.release()
+        await replacement.value
+        XCTAssertEqual(requests.count, 2, "The superseded observer must not send another request")
+    }
+
+    private func trafficSample(at time: UInt64, received: UInt64, sent: UInt64,
+                               session: String = "first") -> InternetTrafficSample {
+        .init(sessionID: session, elapsedMilliseconds: time, rxBytes: received, txBytes: sent)
+    }
+
     func testReturningToSIMReusesInventoryUntilExplicitRefresh() async throws {
         let server = DetailFixtureServer()
         let detail = try await make(server)

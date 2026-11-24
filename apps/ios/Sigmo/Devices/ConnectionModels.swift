@@ -293,14 +293,10 @@ extension Modem {
     var networkSelectionName: String {
         if airplaneMode { return String(localized: "modem.airplane") }
         // This field describes the registered network, independently of the SIM brand.
-        let name = registeredOperator.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !name.isEmpty { return name }
-        let code = registeredOperator.code.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !code.isEmpty { return code }
-        // The backend emits title-cased 3GPP states (Home, Roaming, Searching).
-        switch registrationState.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "searching": return String(localized: "modem.value.searching")
-        case "idle", "denied": return String(localized: "connection.noService")
+        if let name = registeredOperator.displayName { return name }
+        switch cellularRegistration {
+        case .searching: return String(localized: "modem.value.searching")
+        case .idle, .denied: return String(localized: "connection.noService")
         default: return String(localized: "common.unknown")
         }
     }

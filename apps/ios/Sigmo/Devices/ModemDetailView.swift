@@ -76,6 +76,11 @@ private struct ModemDetailScreen: View {
     @State private var refreshID = 0
     @State private var loadedRefreshID = -1
     @State private var tab = DetailTab.overview
+    @State private var networkCardHeight: CGFloat = 0
+    @State private var networkCardScrolled = false
+    @State private var internetTraffic = InternetTrafficState()
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -132,6 +137,12 @@ private struct ModemDetailScreen: View {
     private var addingESIM: Bool { preparingFlow != nil || availableFlow != nil || flow != nil }
     private var isPhysicalSIM: Bool { state.modem?.simKind == "physical" }
     private var showsNetworkBar: Bool { !state.needsSIMUnlock && (state.esim || isPhysicalSIM) }
+
+    private var trafficTarget: ModemSIMTarget? {
+        guard tab == .overview, scenePhase == .active, session.canAccessDevices,
+              let modem = state.modem, modem.state != "locked", !modem.airplaneMode else { return nil }
+        return state.simTarget
+    }
 
     private var tabs: some View {
         TabView(selection: $tab) {
@@ -289,9 +300,40 @@ private struct ModemDetailScreen: View {
         .onDisappear { pending = nil; profileOperation = nil; cancelPreparation(); sim.stop() }
     }
 
+    private var overviewAccent: Color {
+        colorScheme == .dark
+            ? Color(red: 0.73, green: 0.70, blue: 1)
+            : Color(red: 0.32, green: 0.26, blue: 0.75)
+    }
+
     private var overview: some View {
-        List {
+        let sim = state.needsSIMUnlock ? nil : state.modem?.sim
+        return CarrierLogo(icon: sim?.icon, plmn: sim?.operatorIdentifier, regionCode: sim?.regionCode ?? "")
+            .withTint { _, tint in
+                let iconTint = tint?.mix(with: colorScheme == .dark ? .white : .black, by: 0.5, in: .device) ?? overviewAccent
+                overviewList(iconTint: iconTint)
+            }
+    }
+
+    private func overviewList(iconTint: Color) -> some View {
+        let target = trafficTarget
+        let showsTraffic = target != nil && internetTraffic.connectedTarget == target
+        return List {
             if let modem = state.modem {
+                if showsNetworkBar || showsTraffic {
+                    Section {
+                        if showsNetworkBar {
+                            overviewCardRow {
+                                networkCard(modem, iconTint: iconTint)
+                            }
+                        }
+                        if showsTraffic {
+                            overviewCardRow {
+                                InternetTrafficCard(state: internetTraffic, accent: overviewAccent, iconTint: iconTint)
+                            }
+                        }
+                    }
+                }
                 if state.needsSIMUnlock {
                     Section {
                         Label("detail.simLocked", systemImage: "lock")
@@ -322,14 +364,27 @@ private struct ModemDetailScreen: View {
         .environment(\.defaultMinListRowHeight, 44)
         .environment(\.horizontalSizeClass, horizontalSizeClass)
         .labelStyle(.titleAndIcon)
-        // Let content show through around the glass capsule without a full-width edge backdrop.
-        .scrollEdgeEffectHidden(showsNetworkBar, for: .top)
-        .safeAreaBar(edge: .top, spacing: 0) {
-            if showsNetworkBar, let modem = state.modem {
-                networkBar(modem)
+        .contentMargins(.top, showsNetworkBar ? 8 : nil, for: .scrollContent)
+        // Observe the list because it can recycle the card before reporting it offscreen.
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            let distanceFromTop = geometry.contentOffset.y + geometry.contentInsets.top
+            return showsNetworkBar && networkCardHeight > 0 && distanceFromTop > networkCardHeight * 0.9
+        } action: { _, scrolled in
+            networkCardScrolled = scrolled
+        }
+        .onChange(of: showsNetworkBar) { _, shows in
+            if !shows { networkCardScrolled = false }
+        }
+        // Overlay the scrolled list so switching presentations never changes its top inset.
+        .overlay(alignment: .top) {
+            if showsNetworkBar, networkCardScrolled, let modem = state.modem {
+                compactNetworkBar(modem)
             }
         }
         .refreshable { await reload() }
+        .task(id: target) {
+            if let target { await internetTraffic.observe(state, target: target) }
+        }
         .detailErrorAlert($presentedFailure)
         .foregroundTask(id: refreshIdentity) {
             guard tab == .overview else { return }
@@ -412,15 +467,39 @@ private struct ModemDetailScreen: View {
         }
     }
 
-    private func networkBar(_ modem: Modem) -> some View {
-        ViewThatFits(in: .horizontal) {
+    private func networkCard(_ modem: Modem, iconTint: Color) -> some View {
+        ModemNetworkCard(modem: modem, capabilities: session.capabilities ?? [], accent: overviewAccent, iconTint: iconTint) {
+            if let slots = modem.slots, slots.count > 1 {
+                slotMenu(slots, selectedSlot: modem.sim.slot)
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { networkCardHeight = $0 }
+        .opacity(networkCardScrolled ? 0 : 1)
+        .allowsHitTesting(!networkCardScrolled)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("esimNetworkBar")
+        .accessibilityHidden(networkCardScrolled)
+    }
+
+    private func overviewCardRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .listRowInsets(EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+    }
+
+    private func compactNetworkBar(_ modem: Modem) -> some View {
+        let carrier = modem.networkOverviewCarrier.map { Text(verbatim: $0) } ?? Text("detail.networkStatus")
+        return ViewThatFits(in: .horizontal) {
             HStack(spacing: 12) {
-                Text(modem.carrier).fixedSize()
+                carrier.fixedSize()
                 Spacer(minLength: 0)
                 networkControls(modem)
             }
             VStack(spacing: 8) {
-                Text(modem.carrier)
+                carrier
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                 networkControls(modem)
@@ -433,11 +512,9 @@ private struct ModemDetailScreen: View {
         .frame(minHeight: 44)
         .glassEffect(.regular, in: Capsule())
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("esimNetworkBar")
+        .accessibilityIdentifier("esimCompactNetworkBar")
         .padding(.horizontal, 16)
         .padding(.top, 8)
-        // The grouped list already supplies the physical SIM's section spacing below the bar.
-        .padding(.bottom, isPhysicalSIM ? 0 : 8)
     }
 
     private func networkControls(_ modem: Modem) -> some View {

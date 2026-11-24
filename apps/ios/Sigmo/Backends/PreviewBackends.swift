@@ -46,6 +46,7 @@ enum PreviewBackends {
                 switch scenario {
                 case "detail-loading": fixture = .delayedProfiles
                 case "detail-refresh": fixture = .profileRefresh
+                case "detail-roaming", "detail-traffic": fixture = .networkCardBranding
                 case "detail-unavailable": fixture = .unavailableProfiles
                 case "detail-single": fixture = .singleHardware
                 case "detail-notifications": fixture = .notifications
@@ -77,7 +78,14 @@ enum PreviewBackends {
                 case "detail-connection-unlicensed": fixture = .connectionUnlicensed
                 default: fixture = .standard
                 }
+                var connection = ConnectionFixture()
+                connection.internet.trafficEnabled = scenario == "detail-traffic"
+                if scenario == "detail-roaming" {
+                    connection.registrationState = "Roaming"
+                    connection.registeredOperator = .init(name: "Travel Mobile", code: "23410")
+                }
                 let detail = DetailFixtureServer(physical: scenario.hasPrefix("detail-physical"), locked: scenario == "detail-locked", scenario: fixture,
+                                                 initialConnection: connection,
                                                  includesHistory: ["detail-reminder", "detail-deletion-history"].contains(scenario))
                 return BackendAPI(configuration: configuration, transport: { try await detail.respond($0) }, socketFactory: { try await detail.socket($0) })
             }

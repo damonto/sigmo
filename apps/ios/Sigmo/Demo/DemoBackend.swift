@@ -24,6 +24,7 @@ actor DemoBackend {
         self.id = id.uuidString
         self.physical = physical
         var connection = ConnectionFixture()
+        connection.internet.trafficEnabled = true
         connection.wifiRequiresSetup = true
         connection.wifi.emergencyAddressUpdateAvailable = true
         devices = DetailFixtureServer(physical: physical, scenario: .singleHardware, number: "+12025550100", initialConnection: connection)
