@@ -9,6 +9,7 @@ for methods, middleware, and handler bindings.
 | --- | --- | --- |
 | Available network operators | `GET /modems/:id/network-scans/:scanID` reads the scan state and results. | `POST /modems/:id/network-scans` starts or reuses a scan. |
 | Network configuration | `GET /modems/:id/network-settings/{registration,airplane-mode,modes,bands}` | `PUT` on the same URI replaces the writable configuration. |
+| Internet traffic | `GET /modems/:id/internet-connections/current/traffic` reads the managed connection state and cumulative interface byte counters. A `null` sample means counters are unavailable or no connection is active. | |
 | Physical SIM selection | Included in the modem representation | `PUT /modems/:id/sim-slot-selection` with `{"slot":2}`. Repeating the selected slot succeeds without switching again. |
 | Secure elements | `GET /modems/:id/secure-elements` | Installed profiles live under `/modems/:id/secure-elements/:seId/esim-profiles/:iccid`. |
 | eSIM inventory | `GET /modems/:id/esim-profiles` | Activation is a selection: `PUT /modems/:id/secure-elements/:seId/active-esim-profile` with `{"iccid":"..."}`. |

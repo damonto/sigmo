@@ -42,7 +42,8 @@ type IPv6Autoconfiguration struct {
 
 var (
 	ErrDefaultRouteExists = errors.New("default route already exists")
-	errInterfaceNotFound  = errors.New("network interface not found")
+	// ErrInterfaceNotFound means the named link no longer exists.
+	ErrInterfaceNotFound = errors.New("network interface not found")
 )
 
 func DefaultRoutes() ([]DefaultRoute, error) {
@@ -133,7 +134,7 @@ func ReadIPv6Autoconfiguration(name string) (IPv6Autoconfiguration, error) {
 }
 
 func readIPv6Autoconfiguration(root, name string, readFile func(string) ([]byte, error)) (IPv6Autoconfiguration, error) {
-	name, err := ipv6InterfaceName(name)
+	name, err := validInterfaceName(name)
 	if err != nil {
 		return IPv6Autoconfiguration{}, err
 	}
@@ -166,7 +167,7 @@ func SetIPv6Autoconfiguration(name string, cfg IPv6Autoconfiguration) error {
 }
 
 func setIPv6Autoconfiguration(root, name string, cfg IPv6Autoconfiguration, writeFile func(string, []byte, os.FileMode) error) error {
-	name, err := ipv6InterfaceName(name)
+	name, err := validInterfaceName(name)
 	if err != nil {
 		return err
 	}
@@ -193,7 +194,7 @@ func setIPv6Autoconfiguration(root, name string, cfg IPv6Autoconfiguration, writ
 	return result
 }
 
-func ipv6InterfaceName(name string) (string, error) {
+func validInterfaceName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", errors.New("interface name is required")
@@ -246,7 +247,7 @@ func AddVLAN(parentName, name string, id uint16) error {
 func DeleteLink(name string) error {
 	ifi, err := lookupInterface(name)
 	if err != nil {
-		if errors.Is(err, errInterfaceNotFound) {
+		if errors.Is(err, ErrInterfaceNotFound) {
 			return nil
 		}
 		return fmt.Errorf("find interface: %w", err)
@@ -397,7 +398,7 @@ func DeleteHostRoute(interfaceName string, destination netip.Addr) error {
 }
 
 func ignoreMissingInterfaceError(err error) error {
-	if errors.Is(err, errInterfaceNotFound) {
+	if errors.Is(err, ErrInterfaceNotFound) {
 		return nil
 	}
 	return err
@@ -417,7 +418,7 @@ func lookupInterface(name string) (*net.Interface, error) {
 			return nil, lookupErr
 		}
 	}
-	return nil, fmt.Errorf("%w: %s", errInterfaceNotFound, name)
+	return nil, fmt.Errorf("%w: %s", ErrInterfaceNotFound, name)
 }
 
 func prefixFromAddr(addr net.Addr) (netip.Prefix, error) {
@@ -648,16 +649,31 @@ func sameDefaultRoute(a, b DefaultRoute) bool {
 }
 
 func send(msgType uint16, flags uint16, payload []byte) error {
-	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
+	fd, err := openRouteSocket()
 	if err != nil {
-		return fmt.Errorf("open netlink socket: %w", err)
+		return err
 	}
 	defer unix.Close(fd)
-
-	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return fmt.Errorf("bind netlink socket: %w", err)
+	seq, err := sendRouteRequest(fd, msgType, flags, payload)
+	if err != nil {
+		return err
 	}
+	return receiveACK(fd, seq)
+}
 
+func openRouteSocket() (int, error) {
+	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.NETLINK_ROUTE)
+	if err != nil {
+		return -1, fmt.Errorf("open netlink socket: %w", err)
+	}
+	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		unix.Close(fd)
+		return -1, fmt.Errorf("bind netlink socket: %w", err)
+	}
+	return fd, nil
+}
+
+func sendRouteRequest(fd int, msgType uint16, flags uint16, payload []byte) (uint32, error) {
 	seq := uint32(time.Now().UnixNano())
 	req := make([]byte, unix.SizeofNlMsghdr+len(payload))
 	binary.NativeEndian.PutUint32(req[0:4], uint32(len(req)))
@@ -667,9 +683,9 @@ func send(msgType uint16, flags uint16, payload []byte) error {
 	copy(req[unix.SizeofNlMsghdr:], payload)
 
 	if err := unix.Sendto(fd, req, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return fmt.Errorf("send netlink request: %w", err)
+		return 0, fmt.Errorf("send netlink request: %w", err)
 	}
-	return receiveACK(fd, seq)
+	return seq, nil
 }
 
 func routeDump(family int) ([]syscall.NetlinkMessage, error) {
@@ -701,19 +717,23 @@ func receiveACK(fd int, seq uint32) error {
 			}
 			switch msg.Header.Type {
 			case unix.NLMSG_ERROR:
-				if len(msg.Data) < 4 {
-					return errors.New("netlink error response is truncated")
-				}
-				code := int32(binary.NativeEndian.Uint32(msg.Data[:4]))
-				if code == 0 {
-					return nil
-				}
-				return unix.Errno(-code)
+				return netlinkResponseError(msg.Data)
 			case unix.NLMSG_DONE:
 				return nil
 			}
 		}
 	}
+}
+
+func netlinkResponseError(data []byte) error {
+	if len(data) < 4 {
+		return errors.New("netlink error response is truncated")
+	}
+	code := int32(binary.NativeEndian.Uint32(data[:4]))
+	if code == 0 {
+		return nil
+	}
+	return unix.Errno(-code)
 }
 
 func parseDefaultRoutes(data []byte) []DefaultRoute {

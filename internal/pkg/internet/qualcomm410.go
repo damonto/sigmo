@@ -726,6 +726,14 @@ func (c *Connector) recoverConnectedBearer(ctx context.Context, modem internetMo
 	}
 	if ok {
 		tracked.modemGeneration = modem.generation()
+		previous, exists := c.connection(modem.id())
+		if exists && previous.modemGeneration == tracked.modemGeneration &&
+			previous.bearerPath == tracked.bearerPath && previous.interfaceName == tracked.interfaceName &&
+			previous.profileID == modem.profileID() && previous.traffic != nil {
+			tracked.traffic = previous.traffic
+		} else {
+			tracked.traffic = c.startConnectionTraffic(tracked.interfaceName)
+		}
 	}
 	return tracked, metric, ok, err
 }

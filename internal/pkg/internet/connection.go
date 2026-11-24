@@ -89,6 +89,7 @@ type Connector struct {
 	alwaysOnRestore    chan *mmodem.Modem
 	reloadModem        func(context.Context, *mmodem.Modem) (*mmodem.Modem, error)
 	qualcomm410        qualcomm410Ops
+	readLinkBytes      func(string) (netlink.LinkBytes, error)
 }
 
 type ConnectorConfig struct {
@@ -598,6 +599,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 	tracked.bearerPath = bearer.Path()
 	tracked.modemGeneration = modem.generation()
 	tracked.profileID = profileID
+	tracked.traffic = c.startConnectionTraffic(tracked.interfaceName)
 	if prefs.DefaultRoute {
 		tracked, err = c.updateTrackedDefaultRoute(ctx, modemID, tracked, true)
 		if err != nil {

@@ -371,6 +371,13 @@ func TestQMAPProxyLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
+	counters := netlink.LinkBytes{Index: 7, RXBytes: 4096, TXBytes: 2048}
+	connector.readLinkBytes = func(name string) (netlink.LinkBytes, error) {
+		if name != interfaceName {
+			t.Fatalf("traffic interface = %q, want %q", name, interfaceName)
+		}
+		return counters, nil
+	}
 	connector.qmap = qmapOps{
 		openSessions: func(_ context.Context, _ *mmodem.Modem, _ []modemlink.QMAPConfig) ([]modemlink.QMAPSessionResult, error) {
 			return []modemlink.QMAPSessionResult{{Session: &modemlink.QMAPSession{
@@ -413,12 +420,22 @@ func TestQMAPProxyLifecycle(t *testing.T) {
 	if !found || !enabled {
 		t.Fatalf("loadProxyStateForModem() = %t, found %t; want true, true", enabled, found)
 	}
+	counters.RXBytes += 128
+	counters.TXBytes += 64
+	traffic, err := connector.Traffic(ctx, modem)
+	if err != nil || !traffic.Connected || traffic.Sample == nil ||
+		traffic.Sample.RXBytes != 128 || traffic.Sample.TXBytes != 64 {
+		t.Fatalf("Traffic() = %+v (%+v), %v; want 128 RX and 64 TX bytes since connect", traffic, traffic.Sample, err)
+	}
 
 	if err := connector.disconnectQMAPLocked(ctx, modem); err != nil {
 		t.Fatalf("disconnectQMAPLocked() error = %v", err)
 	}
 	if status := proxy.Status(modemID); status.Enabled {
 		t.Fatalf("proxy status after disconnect = %+v, want inactive", status)
+	}
+	if traffic, err := connector.Traffic(ctx, modem); err != nil || traffic.Connected || traffic.Sample != nil {
+		t.Fatalf("Traffic() after disconnect = %+v, %v; want disconnected", traffic, err)
 	}
 	_, found, err = connector.persistence.loadProxyStateForModem(ctx, modemID, interfaceName)
 	if err != nil {

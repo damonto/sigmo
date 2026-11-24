@@ -14,6 +14,14 @@ func (c *Connectivity) Current(ctx context.Context, modem *mmodem.Modem) (*pinte
 	return c.internet.Current(ctx, modem)
 }
 
+// Traffic reads statistics from the managed Internet data path.
+func (c *Connectivity) Traffic(ctx context.Context, modem *mmodem.Modem) (pinternet.TrafficStatus, error) {
+	if c == nil || c.internet == nil {
+		return pinternet.TrafficStatus{}, ErrUnavailable
+	}
+	return c.internet.Traffic(ctx, modem)
+}
+
 func (c *Connectivity) Public(ctx context.Context, modem *mmodem.Modem) (pinternet.IPInfo, error) {
 	if c == nil || c.internet == nil {
 		return pinternet.IPInfo{}, ErrUnavailable

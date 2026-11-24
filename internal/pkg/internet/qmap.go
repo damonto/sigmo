@@ -355,6 +355,7 @@ func (c *Connector) connectQMAPSessionLocked(ctx context.Context, modem *mmodem.
 	}
 	tracked.modemGeneration = modem.Generation()
 	tracked.profileID = profileID
+	tracked.traffic = c.startConnectionTraffic(tracked.interfaceName)
 	connection.tracked = tracked
 	if prefs.DefaultRoute {
 		connection.tracked, err = c.updateTrackedDefaultRoute(ctx, modem.EquipmentIdentifier, tracked, true)

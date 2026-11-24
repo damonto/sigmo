@@ -237,6 +237,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		{
 			h := hinternet.New(deps.Registry, deps.InternetConnections)
 			protected.GET("/modems/:id/internet-connections/current", h.Current)
+			protected.GET("/modems/:id/internet-connections/current/traffic", h.Traffic)
 			protected.GET("/modems/:id/internet-connections/public", h.Public)
 			protected.POST("/modems/:id/internet-connections", h.Connect)
 			protected.PUT("/modems/:id/internet-connections/current/preferences", h.UpdatePreferences)

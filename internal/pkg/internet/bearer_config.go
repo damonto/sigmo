@@ -32,6 +32,7 @@ type trackedConnection struct {
 	routes                    []netlink.DefaultRoute
 	routeChanges              []defaultRouteChange
 	qualcomm410InterfaceState qualcomm410InterfaceState
+	traffic                   *connectionTraffic
 }
 
 func configureBearer(ctx context.Context, stateStore connectionStateStore, modemID string, bearer *mmodem.Bearer, prefs Preferences, routeOps defaultRouteOps) (trackedConnection, error) {

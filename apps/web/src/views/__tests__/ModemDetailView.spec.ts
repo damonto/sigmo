@@ -1,7 +1,9 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import type { ComputedRef, Ref } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import ModemNetworkSummary from '@/components/modem/ModemNetworkSummary.vue'
+import type { InternetTrafficResponse } from '@/types/internet'
 import type { Modem } from '@/types/modem'
 import type { SEsResponse } from '@/types/se'
 import ModemDetailView from '@/views/ModemDetailView.vue'
@@ -9,6 +11,7 @@ import ModemDetailView from '@/views/ModemDetailView.vue'
 const api = vi.hoisted(() => ({
   unlockSim: vi.fn(),
   switchSimSlot: vi.fn(),
+  getTraffic: vi.fn<(id: string, signal: AbortSignal) => Promise<InternetTrafficResponse>>(),
 }))
 
 const reminderApi = vi.hoisted(() => ({
@@ -66,6 +69,8 @@ vi.mock('@/apis/modem', () => ({
   useModemApi: () => api,
 }))
 
+vi.mock('@/apis/internet', () => ({ useInternetApi: () => ({ getTraffic: api.getTraffic }) }))
+
 vi.mock('@/composables/useModems', () => ({
   refreshModemList: detailHarness.refreshModemList,
 }))
@@ -94,6 +99,7 @@ vi.mock('vue-router', async () => {
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
+    locale: { value: 'en' },
     t: (key: string) => key,
   }),
 }))
@@ -383,7 +389,9 @@ const mountView = () =>
     },
   })
 
-describe('ModemDetailView SIM PIN unlock', () => {
+enableAutoUnmount(afterEach)
+
+describe('ModemDetailView', () => {
   beforeEach(() => {
     if (routeHarness.route) {
       routeHarness.route.params.id = 'modem-1'
@@ -391,6 +399,7 @@ describe('ModemDetailView SIM PIN unlock', () => {
     vi.clearAllMocks()
     api.unlockSim.mockResolvedValue(undefined)
     api.switchSimSlot.mockResolvedValue(undefined)
+    api.getTraffic.mockReset().mockResolvedValue({ connected: false, sample: null })
     detailHarness.refreshModemList.mockResolvedValue(undefined)
     detailHarness.handleMsisdnUpdate.mockResolvedValue(true)
     detailHarness.handleInternetConnect.mockResolvedValue(undefined)
@@ -432,6 +441,134 @@ describe('ModemDetailView SIM PIN unlock', () => {
       detailHarness.isSELoading.value = false
     }
   })
+
+  it('shows the SIM operator separately from the registered network while roaming', () => {
+    const modem = detailHarness.modem
+    if (!modem) throw new Error('missing modem detail')
+    modem.value = {
+      ...physicalModem(),
+      registrationState: 'Roaming',
+      registeredOperator: { name: 'Visited Carrier', code: '46001' },
+      signalQuality: 67,
+    }
+
+    const summary = mountView().getComponent(ModemNetworkSummary)
+    const [simOperator, registeredNetwork, registration] = summary.get('dl').findAll('dd')
+    expect(simOperator?.findAll('span').map((part) => part.text())).toEqual(['Carrier', '46000'])
+    expect(registeredNetwork?.findAll('span').map((part) => part.text())).toEqual([
+      'Visited Carrier',
+      '46001',
+    ])
+    expect(registration?.text()).toBe('labels.roaming')
+    expect(summary.text()).toContain('67%')
+  })
+
+  it('shows live traffic, hides it on disconnect, and starts fresh on reconnect', async () => {
+    const modem = detailHarness.modem
+    if (!modem) throw new Error('missing modem detail')
+    modem.value = physicalModem()
+    const response = (
+      elapsedMilliseconds: number,
+      rxBytes: number,
+      txBytes: number,
+      sessionId = 'session-1',
+    ): InternetTrafficResponse => ({
+      connected: true,
+      sample: { sessionId, elapsedMilliseconds, rxBytes, txBytes },
+    })
+    api.getTraffic
+      .mockResolvedValueOnce(response(1000, 2000, 1000))
+      .mockResolvedValueOnce(response(3000, 1_002_000, 501_000))
+      .mockResolvedValueOnce(response(4000, 1_002_000, 501_000))
+      .mockResolvedValueOnce({ connected: false, sample: null })
+      .mockResolvedValueOnce(response(1500, 32, 8, 'session-2'))
+
+    vi.useFakeTimers()
+    try {
+      const summary = mountView().getComponent(ModemNetworkSummary)
+      const traffic = '[aria-label="modemDetail.overview.traffic.title"]'
+      await vi.advanceTimersByTimeAsync(0)
+      expect(summary.get(traffic).text()).toContain('3 kB')
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(summary.get(traffic).text()).toContain('4 Mb/s')
+      expect(summary.get(traffic).text()).toContain('2 Mb/s')
+      expect(summary.get(traffic).text()).toContain('1.5 MB')
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(summary.get(traffic).text()).toContain('modemDetail.overview.traffic.idle')
+      expect(summary.get(traffic).text()).toContain('1.5 MB')
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(summary.find(traffic).exists()).toBe(false)
+      expect(summary.text()).toContain('modemDetail.overview.network')
+
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(summary.get(traffic).text()).toContain('40 B')
+      expect(summary.get(traffic).text()).toContain('—')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops traffic polling when the page is hidden', async () => {
+    if (!detailHarness.modem) throw new Error('missing modem detail')
+    detailHarness.modem.value = physicalModem()
+    api.getTraffic.mockImplementationOnce(
+      (_, signal) =>
+        new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        }),
+    )
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    vi.useFakeTimers()
+    try {
+      mountView()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(api.getTraffic).toHaveBeenCalledTimes(1)
+      const signal = api.getTraffic.mock.calls[0]?.[1]
+
+      visibility.mockReturnValue('hidden')
+      document.dispatchEvent(new Event('visibilitychange'))
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(signal?.aborted).toBe(true)
+      expect(api.getTraffic).toHaveBeenCalledTimes(1)
+
+      visibility.mockReturnValue('visible')
+      document.dispatchEvent(new Event('visibilitychange'))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(api.getTraffic).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+      visibility.mockRestore()
+    }
+  })
+
+  it.each([
+    ['Searching', false, 'modemDetail.overview.registration.searching'],
+    ['Denied', false, 'modemDetail.overview.registration.denied'],
+    ['Home', true, 'modemDetail.settings.networkAirplaneModeStatus'],
+  ])(
+    'clears the displayed serving network for %s with airplane mode %s',
+    (state, airplaneMode, label) => {
+      const modem = detailHarness.modem
+      if (!modem) throw new Error('missing modem detail')
+      modem.value = {
+        ...physicalModem(),
+        registrationState: state,
+        registeredOperator: { name: 'Previous network', code: '46001' },
+        airplaneMode,
+        wifiCallingConnected: true,
+      }
+
+      const summary = mountView().getComponent(ModemNetworkSummary)
+      const [simOperator, registeredNetwork, registration] = summary.get('dl').findAll('dd')
+      expect(simOperator?.findAll('span').map((part) => part.text())).toEqual(['Carrier', '46000'])
+      expect(registeredNetwork?.text()).toBe('—')
+      expect(registration?.text()).toBe(label)
+      expect(summary.text()).toContain('modemDetail.calls.routes.wifiCalling')
+    },
+  )
 
   it('opens the PIN dialog for locked SIM PIN modems', async () => {
     const wrapper = mountView()

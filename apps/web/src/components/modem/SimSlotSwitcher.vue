@@ -117,14 +117,14 @@ const slotOptionClass = (slot: SlotInfo) => {
 
 <template>
   <div
-    class="flex min-w-0 items-center gap-2 rounded-lg bg-card/90 px-3 py-2 shadow-sm backdrop-blur-xl lg:mt-1 lg:rounded-none lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none dark:bg-card/70 dark:shadow-none dark:lg:bg-transparent"
+    class="flex min-w-0 items-center gap-2 rounded-lg bg-card/90 px-3 py-2 shadow-sm backdrop-blur-xl lg:rounded-none lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none dark:bg-card/70 dark:shadow-none dark:lg:bg-transparent"
   >
     <RadioGroup
       v-if="slots.length"
       :model-value="selectedSlot"
       :disabled="!hasMultipleSlots"
       :aria-label="t('modemDetail.overview.simSlot')"
-      class="inline-flex min-w-0 items-center gap-1 overflow-x-auto lg:flex-wrap lg:overflow-visible"
+      class="inline-flex min-w-0 items-center gap-1 overflow-x-auto"
       @update:model-value="handleSelect"
     >
       <div v-for="slot in slots" :key="slot.slot" class="relative flex shrink-0 items-center">

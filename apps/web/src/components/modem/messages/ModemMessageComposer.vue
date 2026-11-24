@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,11 @@ const message = defineModel<string>('message', { required: true })
 const recipient = defineModel<string>('recipient')
 
 const { t } = useI18n()
+const form = useTemplateRef<HTMLFormElement>('form')
+
+defineExpose({
+  focusMessage: () => form.value?.querySelector('textarea')?.focus(),
+})
 
 const messageLength = computed(() => message.value.length)
 const hasMessage = computed(() => message.value.trim().length > 0)
@@ -37,6 +42,7 @@ const updateRecipient = (event: Event) => {
 
 <template>
   <form
+    ref="form"
     class="mt-auto shrink-0 space-y-2 border-t border-border px-1 pt-3 pb-3"
     @submit.prevent="emit('submit')"
   >
@@ -62,6 +68,7 @@ const updateRecipient = (event: Event) => {
         rows="1"
         class="min-h-10 flex-1 resize-none"
         :placeholder="t('modemDetail.messages.replyPlaceholder')"
+        :aria-label="t('modemDetail.messages.replyPlaceholder')"
         :disabled="props.isSending || props.isLoading"
       />
       <Button

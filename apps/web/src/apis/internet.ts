@@ -1,5 +1,6 @@
 import { fetchJson } from '@/lib/fetch'
 
+import { parseInternetTrafficResponse } from '@/types/internet'
 import type {
   ConnectInternetPayload,
   InternetConnectionPreferencesPayload,
@@ -14,6 +15,15 @@ export const useInternetApi = () => {
 
   const getPublic = (id: string) => {
     return fetchJson<InternetPublicResponse>(`modems/${id}/internet-connections/public`)
+  }
+
+  const getTraffic = async (id: string, signal: AbortSignal) => {
+    const { data } = await fetchJson<unknown>(
+      `modems/${encodeURIComponent(id)}/internet-connections/current/traffic`,
+      { signal, cache: 'no-store' },
+      true,
+    )
+    return parseInternetTrafficResponse(data.value)
   }
 
   const connect = (id: string, payload: ConnectInternetPayload) => {
@@ -42,6 +52,7 @@ export const useInternetApi = () => {
   return {
     getCurrentConnection,
     getPublic,
+    getTraffic,
     connect,
     disconnect,
     updatePreferences,

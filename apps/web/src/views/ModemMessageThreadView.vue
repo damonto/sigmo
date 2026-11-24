@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { CircleAlert, Phone } from 'lucide-vue-next'
+import { ArrowRight, CardSim, Phone } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   Dialog,
   DialogContent,
@@ -71,6 +70,14 @@ const {
   profileId,
   activeProfileId,
 })
+
+const messageComposerRef =
+  useTemplateRef<InstanceType<typeof ModemMessageComposer>>('messageComposerRef')
+const replyWithActiveSim = async () => {
+  useActiveProfile()
+  await nextTick()
+  messageComposerRef.value?.focusMessage()
+}
 
 const confirmCall = ref(false)
 const callError = ref('')
@@ -215,29 +222,44 @@ watch(
         />
       </div>
 
-      <Alert
+      <div
         v-if="!canSend"
-        class="my-2 shrink-0"
+        class="mx-2 my-1 flex shrink-0 flex-col gap-2 rounded-lg border border-primary/15 bg-primary/5 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 lg:mx-0"
       >
-        <CircleAlert />
-        <AlertTitle>{{ t('modemDetail.messages.inactiveLineTitle') }}</AlertTitle>
-        <AlertDescription
-          class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+        <div
+          role="status"
+          class="flex min-w-0 items-center gap-3"
         >
-          <span>{{ t('modemDetail.messages.inactiveLine') }}</span>
-          <Button
-            v-if="canUseActive"
-            type="button"
-            size="sm"
-            class="w-full shrink-0 sm:w-auto"
-            @click="useActiveProfile"
+          <div
+            class="grid size-10 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"
           >
-            {{ t('communication.useCurrentLine') }}
-          </Button>
-        </AlertDescription>
-      </Alert>
+            <CardSim
+              aria-hidden="true"
+              class="size-5"
+            />
+          </div>
+          <div>
+            <p class="text-sm font-semibold">{{ t('modemDetail.messages.inactiveLineTitle') }}</p>
+            <p class="text-xs text-muted-foreground">
+              {{ t('modemDetail.messages.inactiveLine') }}
+            </p>
+          </div>
+        </div>
+        <Button
+          v-if="canUseActive"
+          type="button"
+          variant="outline"
+          class="self-end border-primary/50 bg-background text-primary shadow-none hover:bg-primary/10 hover:text-primary sm:self-auto dark:border-primary/50 dark:bg-background dark:hover:bg-primary/10"
+          @click="replyWithActiveSim"
+        >
+          {{ t('modemDetail.messages.useActiveSim') }}
+          <ArrowRight aria-hidden="true" />
+        </Button>
+      </div>
 
       <ModemMessageComposer
+        v-if="canSend || isNewConversation"
+        ref="messageComposerRef"
         v-model:message="messageDraft"
         v-model:recipient="newRecipient"
         :is-new-conversation="isNewConversation"

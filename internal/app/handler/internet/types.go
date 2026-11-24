@@ -39,6 +39,20 @@ type ConnectionResponse struct {
 	RouteMetric     int      `json:"routeMetric" jsonschema:"metric used for routes installed by this connection"`
 }
 
+// TrafficResponse contains the connection state and an optional fresh sample.
+type TrafficResponse struct {
+	Connected bool           `json:"connected"`
+	Sample    *TrafficSample `json:"sample"`
+}
+
+// TrafficSample contains session byte totals and their monotonic sample time.
+type TrafficSample struct {
+	SessionID           string `json:"sessionId"`
+	ElapsedMilliseconds int64  `json:"elapsedMilliseconds"`
+	RXBytes             uint64 `json:"rxBytes"`
+	TXBytes             uint64 `json:"txBytes"`
+}
+
 type PublicResponse struct {
 	IP           string `json:"ip" jsonschema:"public IP address observed for this modem connection"`
 	Country      string `json:"country" jsonschema:"country associated with the public IP; empty when unavailable"`

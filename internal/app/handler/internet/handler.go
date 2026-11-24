@@ -37,6 +37,28 @@ func (h *Handler) Current(c *echo.Context) error {
 	return c.JSON(http.StatusOK, ResponseFromConnection(response))
 }
 
+// Traffic serves a lightweight sample for the current managed connection.
+func (h *Handler) Traffic(c *echo.Context) error {
+	const errorCode = "current_internet_connection_failed"
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCode)
+	}
+	traffic, err := h.connections.Traffic(ctx, modem)
+	if err != nil {
+		return internetError(c, err, errorCode)
+	}
+	response := TrafficResponse{Connected: traffic.Connected}
+	if sample := traffic.Sample; sample != nil {
+		response.Sample = &TrafficSample{
+			SessionID: sample.SessionID, ElapsedMilliseconds: sample.ElapsedMilliseconds,
+			RXBytes: sample.RXBytes, TXBytes: sample.TXBytes,
+		}
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
 func (h *Handler) Public(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
