@@ -122,10 +122,12 @@ struct HomeDevicesView: View {
                 let groups = Dictionary(grouping: devices, by: { $0.session.id })
                 if devices.isEmpty && !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     ContentUnavailableView.search(text: search)
+                        .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .accessibilityIdentifier("homeSearchEmpty")
                 } else if devices.isEmpty && !sessions.isEmpty && sessions.allSatisfy({ !$0.isRefreshing }) {
                     ContentUnavailableView("devices.empty", systemImage: "simcard")
+                        .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .accessibilityIdentifier("homeDevicesEmpty")
                 }

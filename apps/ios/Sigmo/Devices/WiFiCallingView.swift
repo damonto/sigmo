@@ -84,11 +84,14 @@ struct WiFiCallingView: View {
             } footer: { Text("connection.wifiHint") }
             if let settings = state.settings {
                 Section {
-                    DetailValue(title: "connection.status", value: detailText(settings.statusKey))
-                        .accessibilityIdentifier("wifiCallingStatus")
+                    IMSConnectionStatusRow(access: .wifiCalling, statusKey: settings.statusKey,
+                                           identifier: "wifiCallingStatus", enabled: settings.enabled,
+                                           connected: settings.connected, progress: settings.progress)
                     ConnectionDurationRow(seconds: settings.durationSeconds, observedAt: state.observedAt,
-                                          running: settings.enabled && settings.connected)
-                    if settings.enabled, !settings.connected, let error = settings.lastError, !error.isEmpty {
+                                          running: settings.enabled && settings.connected
+                                            && settings.progress?.pending != true && settings.progress?.failed != true)
+                    if settings.enabled, !settings.connected, settings.progress == nil,
+                       let error = settings.lastError, !error.isEmpty {
                         Text(error).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     if settings.enabled {

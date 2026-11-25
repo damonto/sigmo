@@ -85,6 +85,56 @@ describe('WiFiCallingStatusPanel', () => {
     expect(wrapper.emitted('reconnect')).toHaveLength(1)
   })
 
+  it('keeps the key nodes together under the status and resets them on a new attempt', async () => {
+    const startedAt = '2026-11-25T02:30:00Z'
+    const progress = {
+      attempt: 1,
+      status: 'running',
+      stage: 'epdg_eap_aka',
+      stageStartedAt: startedAt,
+      steps: [{ stage: 'epdg_ike_init', status: 'completed', startedAt }],
+    }
+    const wrapper = mountPanel('en', { state: 'connecting', progress })
+    const row = wrapper.get('ol[aria-label="Connection progress"]')
+    const nodes = () => row.findAll('li')
+    const statuses = () => nodes().map((node) => node.attributes('title'))
+
+    expect(row.element.parentElement?.firstElementChild?.textContent).toContain('Connecting')
+    expect(row.element.parentElement?.parentElement?.nextElementSibling?.textContent).toContain(
+      'Connection duration',
+    )
+    expect(nodes().map((node) => node.get('span.text-xs').text())).toEqual([
+      'ePDG',
+      'AKA',
+      'IPsec',
+      'IMS',
+    ])
+    expect(statuses()).toEqual(['Completed', 'In progress', 'Not reached', 'Not reached'])
+
+    await wrapper.setProps({
+      progress: {
+        ...progress,
+        status: 'waiting',
+        stage: 'retry_wait',
+        steps: [...progress.steps, { stage: 'epdg_eap_aka', status: 'failed', startedAt }],
+      },
+    })
+    expect(statuses()).toEqual(['Completed', 'Failed', 'Not reached', 'Not reached'])
+
+    await wrapper.setProps({
+      progress: { ...progress, attempt: 2, stage: 'epdg_ike_init', steps: [] },
+    })
+    expect(statuses()).toEqual(['In progress', 'Not reached', 'Not reached', 'Not reached'])
+
+    await wrapper.setProps({
+      connected: true,
+      state: 'connected',
+      progress: { ...progress, attempt: 2, stage: 'ims_starting', status: 'ready', steps: [] },
+    })
+    expect(row.element.previousElementSibling?.textContent).toBe('Connected')
+    expect(statuses()).toEqual(['Completed', 'Completed', 'Completed', 'Completed'])
+  })
+
   it('disables reconnect while reconnecting', () => {
     const wrapper = mountPanel('en', { isReconnecting: true })
 

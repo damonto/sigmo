@@ -25,6 +25,7 @@ const {
   volteEnabled,
   volteConnected,
   volteState,
+  volteProgress,
   volteDurationSeconds,
   volteModemRegistered,
   volteDataPath,
@@ -34,6 +35,7 @@ const {
   updateDataPath,
 } = useModemVoLTE({
   modemId,
+  simId: computed(() => modem.value?.sim?.identifier),
   enabled: canUseVoLTE,
   onSuccess: showFeedback,
   onError: showError,
@@ -54,6 +56,7 @@ const {
         :connected="volteConnected"
         :modem-registered="volteModemRegistered"
         :state="volteState"
+        :progress="volteProgress"
         :duration-seconds="volteDurationSeconds"
         :is-loading="isVoLTELoading"
       />

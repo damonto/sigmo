@@ -5,12 +5,15 @@ import { useI18n } from 'vue-i18n'
 
 import VoLTEIcon from '@/components/modem/VoLTEIcon.vue'
 import { Card, CardContent } from '@/components/ui/card'
+import type { ConnectionProgress } from '@/types/connectionProgress'
+import ConnectionProgressNodes from './ConnectionProgressNodes.vue'
 
 const props = defineProps<{
   enabled: boolean
   connected: boolean
   modemRegistered: boolean
   state: string
+  progress?: ConnectionProgress
   durationSeconds: number
   isLoading: boolean
 }>()
@@ -21,6 +24,10 @@ const normalizedState = computed(() => {
   if (props.isLoading) return 'loading'
   if (!props.enabled && props.modemRegistered) return 'modem_managed'
   if (!props.enabled) return 'disabled'
+  if (props.progress?.status === 'failed') return 'disconnected'
+  if (props.progress?.status === 'running' || props.progress?.status === 'waiting') {
+    return 'connecting'
+  }
   if (props.connected || props.state === 'connected') return 'connected'
   if (props.state === 'connecting') return 'connecting'
   return 'disconnected'
@@ -82,7 +89,7 @@ const formatDuration = (seconds: number) => {
     "
   >
     <CardContent class="p-0">
-      <div class="flex items-start gap-3 border-b border-border/70 p-4">
+      <div class="flex items-start gap-3 p-4">
         <div
           class="relative flex size-11 shrink-0 items-center justify-center rounded-full"
           :class="isActive ? 'bg-emerald-500/10 text-emerald-600' : 'bg-primary/10 text-primary'"
@@ -114,6 +121,12 @@ const formatDuration = (seconds: number) => {
           >
             {{ statusLabel }}
           </p>
+          <ConnectionProgressNodes
+            v-if="props.enabled && !props.isLoading"
+            access="volte"
+            :connected="isConnected"
+            :progress="props.progress"
+          />
           <p
             v-if="statusDescription"
             class="truncate text-sm text-muted-foreground"
@@ -123,7 +136,9 @@ const formatDuration = (seconds: number) => {
         </div>
       </div>
 
-      <div class="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+      <div
+        class="flex items-center justify-between gap-3 border-t border-border/70 px-4 py-3 text-sm"
+      >
         <span class="text-muted-foreground">
           {{ t('modemDetail.settings.volteDuration') }}
         </span>

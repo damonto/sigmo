@@ -165,6 +165,7 @@ type VoLTESettings struct {
 }
 
 type WiFiCallingStatus struct {
+	Progress  *ConnectionProgress
 	LastError string
 	WiFiCallingSettings
 	Connected       bool
@@ -174,6 +175,7 @@ type WiFiCallingStatus struct {
 }
 
 type VoLTEStatus struct {
+	Progress *ConnectionProgress
 	VoLTESettings
 	Connected       bool
 	State           string

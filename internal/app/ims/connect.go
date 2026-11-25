@@ -90,7 +90,8 @@ type connectAttempt struct {
 }
 
 type managedVoLTEOps struct {
-	openDevice func(*mmodem.Modem) (managedVoLTEDevice, error)
+	onPacketServiceWait func()
+	openDevice          func(*mmodem.Modem) (managedVoLTEDevice, error)
 }
 
 func defaultManagedVoLTEOps() managedVoLTEOps {
@@ -302,11 +303,18 @@ func (c *coordinator) endAirplaneModeChange(ctx context.Context, modemID string)
 
 func (c *coordinator) connectLoop(ctx context.Context, session *sessionState) error {
 	modem, sessionID := session.modem, session.id
+	modemID := modem.EquipmentIdentifier
+	c.beginProgress(modemID, sessionID)
 	var imsProfile wwan.IMSProfile
 	if c.access == AccessVoLTE {
 		var err error
-		imsProfile, err = c.managedVoLTEOperations().prepare(ctx, modem, c.internet)
+		ops := c.managedVoLTEOperations()
+		ops.onPacketServiceWait = func() {
+			c.enterProgress(modemID, sessionID, progressPacket, imsgo.ProgressRunning, 0)
+		}
+		imsProfile, err = ops.prepare(ctx, modem, c.internet)
 		if err != nil {
+			c.failProgress(modemID, sessionID, err)
 			slog.Warn("prepare VoLTE startup", "imei", modem.EquipmentIdentifier, "error", err)
 			c.markDisconnected(modem.EquipmentIdentifier, sessionID, nil)
 			return nil
@@ -326,8 +334,9 @@ func (c *coordinator) connectLoop(ctx context.Context, session *sessionState) er
 			c.markDisconnected(modem.EquipmentIdentifier, sessionID, nil)
 			return nil
 		}
-		c.markConnected(modem.EquipmentIdentifier, sessionID, client)
+		c.markConnected(modemID, sessionID, client)
 		closeErr := c.runClient(ctx, session, client)
+		c.finishProgressClient(modemID, sessionID, client)
 		if ctx.Err() != nil {
 			return closeErr
 		}
@@ -336,14 +345,17 @@ func (c *coordinator) connectLoop(ctx context.Context, session *sessionState) er
 		}
 		c.markConnecting(modem.EquipmentIdentifier, sessionID)
 		delay := retryDelays[0]
+		c.enterProgress(modemID, sessionID, progressRetry, imsgo.ProgressWaiting, delay)
 		slog.Warn("IMS access disconnected", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "retryIn", delay)
 		if err := sleep(ctx, delay); err != nil {
 			return nil
 		}
+		c.beginProgress(modemID, sessionID)
 	}
 }
 
 func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem, attempt connectAttempt) (*imsgo.Client, error) {
+	modemID := modem.EquipmentIdentifier
 	retry := 0
 	for {
 		client, err := c.connectOnce(ctx, modem, attempt)
@@ -353,7 +365,8 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		c.recordSessionError(modem.EquipmentIdentifier, attempt.sessionID, err)
+		c.recordSessionError(modemID, attempt.sessionID, err)
+		c.failProgress(modemID, attempt.sessionID, err)
 		if errors.Is(err, ErrUnavailable) {
 			slog.Warn("IMS access unavailable", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
 			return nil, err
@@ -361,16 +374,19 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 		if errors.Is(err, ErrWiFiCallingUnderlayUnavailable) {
 			c.markWaitingForUplink(modem.EquipmentIdentifier, attempt.sessionID)
 			delay := retryDelays[0]
+			c.enterProgress(modemID, attempt.sessionID, progressUplinkWait, imsgo.ProgressWaiting, delay)
 			slog.Info("Wi-Fi Calling waiting for uplink", "imei", modem.EquipmentIdentifier, "retryIn", delay, "error", err)
 			if err := sleep(ctx, delay); err != nil {
 				return nil, err
 			}
-			c.markConnecting(modem.EquipmentIdentifier, attempt.sessionID)
+			c.markConnecting(modemID, attempt.sessionID)
+			c.beginProgress(modemID, attempt.sessionID)
 			retry = 0
 			continue
 		}
 		setupErr, setupFailed := errors.AsType[*wfcsetup.Error](err)
 		if errors.Is(err, wfcsetup.ErrDenied) || (attempt.wfcRecheck && setupFailed) {
+			c.updateProgress(modemID, attempt.sessionID, func(p *ConnectionProgress) { p.recordFailure(err) })
 			return nil, err
 		}
 		if errors.Is(err, wfcsetup.ErrUserActionRequired) {
@@ -383,10 +399,14 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 				return nil, err
 			}
 			attempt.wfcRecheck = true
+			c.beginProgress(modemID, attempt.sessionID)
 			retry = 0
 			continue
 		}
 		if retry >= len(retryDelays) {
+			if errors.Is(err, wfcsetup.ErrPending) {
+				c.updateProgress(modemID, attempt.sessionID, func(p *ConnectionProgress) { p.recordFailure(err) })
+			}
 			slog.Warn("IMS access connection attempts exhausted", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
 			return nil, err
 		}
@@ -395,18 +415,22 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 			delay = max(delay, setupErr.Result.RetryAfter)
 		}
 		retry++
+		c.enterProgress(modemID, attempt.sessionID, progressRetry, imsgo.ProgressWaiting, delay)
 		slog.Warn("IMS access connect", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "retryIn", delay, "error", err)
 		if err := sleep(ctx, delay); err != nil {
 			return nil, err
 		}
+		c.beginProgress(modemID, attempt.sessionID)
 	}
 }
 
 func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, attempt connectAttempt) (*imsgo.Client, error) {
+	modemID := modem.EquipmentIdentifier
 	var volteInterfaceName string
 	var dataPath DataPath
 	wwanConfig := WWANConfig{Access: c.access}
 	if c.access == AccessVoLTE {
+		c.enterProgress(modemID, attempt.sessionID, progressVoLTEData, imsgo.ProgressRunning, 0)
 		port, err := voLTEPort(modem)
 		if err != nil {
 			return nil, err
@@ -469,6 +493,9 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 			}
 		}
 	}
+	if c.access == AccessWiFiCalling {
+		c.enterProgress(modemID, attempt.sessionID, progressUplink, imsgo.ProgressRunning, 0)
+	}
 	cfg, err := c.modemClientConfig(ctx, modem, attempt.imsProfile.Index, volteInterfaceName)
 	if err != nil {
 		return nil, err
@@ -476,6 +503,7 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 	configureQualcomm410IMSPDNType(cfg, dataPath, attempt.imsProfile.PDNType)
 	cfg.IMS.RegistrationGroup = attempt.registrationGroup
 	for try := 0; try < 2; try++ {
+		c.enterProgress(modemID, attempt.sessionID, progressSIM, imsgo.ProgressRunning, 0)
 		reader, err := OpenWWAN(ctx, modem, wwanConfig)
 		if err != nil {
 			return nil, err
@@ -484,6 +512,7 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 		if err != nil {
 			return nil, err
 		}
+		c.bindProgressClient(modemID, attempt.sessionID, client)
 		// Bound the complete attempt, including registration-group and AKA waits
 		// that happen outside SIP transaction timers. The active client owns its
 		// own lifetime once Connect returns.
@@ -495,11 +524,18 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 		}
 		cancelConnect()
 		if err != nil {
+			c.finishProgressClient(modemID, attempt.sessionID, client)
 			if closeErr := client.Close(); closeErr != nil {
 				slog.Warn("close failed IMS connection", "imei", modem.EquipmentIdentifier, "error", closeErr)
 			}
 			if c.access == AccessVoLTE && try == 0 && isIMSCallAlreadyPresent(err) {
-				if resetErr := c.managedVoLTEOperations().resetOccupied(ctx, modem, c.internet); resetErr != nil {
+				c.failProgress(modemID, attempt.sessionID, err)
+				c.beginProgress(modemID, attempt.sessionID)
+				ops := c.managedVoLTEOperations()
+				ops.onPacketServiceWait = func() {
+					c.enterProgress(modemID, attempt.sessionID, progressPacket, imsgo.ProgressRunning, 0)
+				}
+				if resetErr := ops.resetOccupied(ctx, modem, c.internet); resetErr != nil {
 					return nil, errors.Join(err, fmt.Errorf("reset occupied IMS PDN: %w", resetErr))
 				}
 				continue
@@ -656,13 +692,16 @@ func (ops managedVoLTEOps) prepare(ctx context.Context, modem *mmodem.Modem, int
 			if err := device.SetIMSSTestMode(ctx, true); err != nil {
 				return wwan.IMSProfile{}, fmt.Errorf("enable IMSS test mode: %w", err)
 			}
-			if err := resetManagedVoLTE(ctx, modem, device, internet); err != nil {
+			if err := resetManagedVoLTE(ctx, modem, device, internet, ops.onPacketServiceWait); err != nil {
 				return wwan.IMSProfile{}, err
 			}
 			packetServiceReady = true
 		}
 	}
 	if !packetServiceReady {
+		if ops.onPacketServiceWait != nil {
+			ops.onPacketServiceWait()
+		}
 		waitCtx, cancel := context.WithTimeout(ctx, packetServiceWaitTimeout)
 		err := waitForPacketService(waitCtx, device)
 		cancel()
@@ -697,16 +736,19 @@ func (ops managedVoLTEOps) release(ctx context.Context, modem *mmodem.Modem, int
 	if err := device.SetIMSSTestMode(ctx, false); err != nil {
 		return fmt.Errorf("disable IMSS test mode: %w", err)
 	}
-	return resetManagedVoLTE(ctx, modem, device, internet)
+	return resetManagedVoLTE(ctx, modem, device, internet, nil)
 }
 
-func resetManagedVoLTE(ctx context.Context, modem *mmodem.Modem, device managedVoLTEDevice, internet internetRestorer) error {
+func resetManagedVoLTE(ctx context.Context, modem *mmodem.Modem, device managedVoLTEDevice, internet internetRestorer, onPacketServiceWait func()) error {
 	prefs, reconnect, err := internetBeforeVoLTEReset(ctx, modem, internet)
 	if err != nil {
 		return err
 	}
 	if err := cycleVoLTEAirplaneMode(ctx, device); err != nil {
 		return err
+	}
+	if onPacketServiceWait != nil {
+		onPacketServiceWait()
 	}
 	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), packetServiceWaitTimeout)
 	waitErr := waitForPacketService(waitCtx, device)
@@ -726,7 +768,7 @@ func (ops managedVoLTEOps) resetOccupied(ctx context.Context, modem *mmodem.Mode
 	defer func() {
 		err = errors.Join(err, device.Close())
 	}()
-	return resetManagedVoLTE(ctx, modem, device, internet)
+	return resetManagedVoLTE(ctx, modem, device, internet, ops.onPacketServiceWait)
 }
 
 func restoreInternet(ctx context.Context, modem *mmodem.Modem, internet internetRestorer, prefs pinternet.Preferences) error {

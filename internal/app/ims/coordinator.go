@@ -71,25 +71,27 @@ type coordinator struct {
 }
 
 type sessionState struct {
-	id           uint64
-	modem        *mmodem.Modem
-	cancel       context.CancelFunc
-	done         <-chan struct{}
-	closeErr     error // Written by the connection loop before done closes.
-	reconnect    chan struct{}
-	lastError    string
-	phase        sessionPhase
-	client       *imsgo.Client
-	ussd         *imsgo.USSDSession
-	calls        map[string]*voiceCallState
-	pendingDial  *pendingVoiceDial
-	deviceKey    string
-	generation   uint64
-	profileID    string
-	numberTarget mmodem.SIMIdentity
-	connected    bool
-	connectedAt  time.Time
-	websheet     *websheet.Session
+	id             uint64
+	modem          *mmodem.Modem
+	cancel         context.CancelFunc
+	done           <-chan struct{}
+	closeErr       error // Written by the connection loop before done closes.
+	reconnect      chan struct{}
+	lastError      string
+	phase          sessionPhase
+	progress       *ConnectionProgress
+	progressClient *imsgo.Client
+	client         *imsgo.Client
+	ussd           *imsgo.USSDSession
+	calls          map[string]*voiceCallState
+	pendingDial    *pendingVoiceDial
+	deviceKey      string
+	generation     uint64
+	profileID      string
+	numberTarget   mmodem.SIMIdentity
+	connected      bool
+	connectedAt    time.Time
+	websheet       *websheet.Session
 }
 
 const imsSessionCleanupTimeout = 30 * time.Second
@@ -533,6 +535,7 @@ func (c *coordinator) Disconnect(ctx context.Context, modem *mmodem.Modem) error
 }
 
 type sessionStatus struct {
+	Progress        *ConnectionProgress
 	LastError       string
 	Connected       bool
 	State           string
@@ -551,7 +554,15 @@ func (c *coordinator) SessionStatus(ctx context.Context, modem *mmodem.Modem, en
 	c.mu.Lock()
 	session := c.sessions[modem.EquipmentIdentifier]
 	status := statusFromSession(enabled, session, profileID, time.Now())
+	var client *imsgo.Client
+	if status.Progress != nil {
+		client = session.progressClient
+	}
 	c.mu.Unlock()
+
+	if client != nil {
+		status.Progress = combineProgress(status.Progress, client.ConnectionProgress())
+	}
 	return status, nil
 }
 
@@ -564,6 +575,9 @@ func statusFromSession(enabled bool, session *sessionState, profileID string, no
 		return status
 	}
 	status.LastError = session.lastError
+	if enabled {
+		status.Progress = session.progress.clone()
+	}
 	switch session.phase {
 	case sessionPhaseConnected:
 		status.Connected = session.client != nil

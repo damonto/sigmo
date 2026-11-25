@@ -168,3 +168,179 @@ struct ConnectionSecretValue: View {
         } label: { Text(detailText(title)) }
     }
 }
+
+struct IMSConnectionStatusRow: View {
+    let access: IMSConnectionProgressNodes.Access
+    let statusKey: String
+    let identifier: String
+    let enabled: Bool
+    let connected: Bool
+    let progress: IMSConnectionProgress?
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            DetailValue(title: "connection.status", value: detailText(statusKey))
+                .accessibilityIdentifier(identifier)
+            if enabled {
+                IMSConnectionProgressNodes(access: access, connected: connected, progress: progress)
+            }
+        }
+    }
+}
+
+struct IMSConnectionProgressNodes: View {
+    enum Access {
+        case wifiCalling, volte
+    }
+
+    private struct Milestone {
+        let label: String
+        let stages: [String]
+
+        init(_ label: String, _ stages: [String]) {
+            self.label = label
+            self.stages = stages
+        }
+    }
+
+    private enum Status: String {
+        case pending, current, completed, failed
+    }
+
+    private struct Node {
+        let label: String
+        let status: Status
+    }
+
+    let access: Access
+    let connected: Bool
+    let progress: IMSConnectionProgress?
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let nodes = nodes
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                ForEach(nodes.indices, id: \.self) { index in
+                    let node = nodes[index]
+                    HStack(spacing: 4) {
+                        nodeLabel(node).fixedSize(horizontal: true, vertical: false)
+                        if index + 1 < nodes.count {
+                            let reached = node.status == .completed && nodes[index + 1].status != .pending
+                            Rectangle()
+                                .fill(reached ? completedColor.opacity(0.46) : .secondary.opacity(0.24))
+                                .frame(minWidth: 4, maxWidth: .infinity)
+                                .frame(height: 1)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(nodes.indices, id: \.self) { index in
+                    nodeLabel(nodes[index])
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("connection.imsProgress.label"))
+    }
+
+    private func nodeLabel(_ node: Node) -> some View {
+        HStack(spacing: 4) {
+            marker(node.status)
+                .frame(width: 12, height: 12)
+                .accessibilityHidden(true)
+            Text(verbatim: node.label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(node.status == .pending ? .secondary : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: node.label))
+        .accessibilityValue(Text(LocalizedStringKey("connection.imsProgress." + node.status.rawValue)))
+        .accessibilityIdentifier("imsProgressNode-" + node.label)
+    }
+
+    private var completedColor: Color {
+        colorScheme == .dark ? .green : Color(red: 0, green: 0.48, blue: 0.32)
+    }
+
+    private func marker(_ status: Status) -> some View {
+        ZStack {
+            switch status {
+            case .pending:
+                Circle().fill(.background)
+                Circle().strokeBorder(.secondary.opacity(0.35))
+            case .current:
+                Circle().fill(.background)
+                Circle().strokeBorder(Color.accentColor)
+                Circle().fill(Color.accentColor).frame(width: 6, height: 6)
+            case .completed:
+                Circle().fill(completedColor)
+                Image(systemName: "checkmark")
+                    .foregroundStyle(colorScheme == .dark ? .black : .white)
+            case .failed:
+                Circle().fill(.red)
+                Image(systemName: "xmark").foregroundStyle(.white)
+            }
+        }
+        .font(.system(size: 7, weight: .bold))
+    }
+
+    private var milestones: [Milestone] {
+        switch access {
+        case .wifiCalling:
+            [
+                Milestone("ePDG", ["epdg_resolve", "epdg_ike_init"]),
+                Milestone("AKA", ["epdg_eap_aka"]),
+                Milestone("IPsec", ["epdg_ipsec"]),
+                Milestone("IMS", ["ims_transport", "ims_registration_slot", "ims_register_challenge", "ims_aka",
+                                  "ims_ipsec", "ims_register_final", "ims_starting", "ims_disconnected"])
+            ]
+        case .volte:
+            [
+                Milestone("LTE", ["lte_packet_service", "volte_data_path"]),
+                Milestone("IMS PDN", ["ims_pdn"]),
+                Milestone("AKA", ["ims_transport", "ims_registration_slot", "ims_register_challenge", "ims_aka"]),
+                Milestone("IMS", ["ims_ipsec", "ims_register_final", "ims_starting", "ims_disconnected"])
+            ]
+        }
+    }
+
+    private var nodes: [Node] {
+        let milestones = milestones
+        let ready = progress.map { $0.status == "ready" } ?? connected
+        let active = activeNode(in: milestones)
+        return milestones.enumerated().map { index, milestone in
+            let status: Status
+            if ready || index < active.index {
+                status = .completed
+            } else {
+                status = index == active.index ? active.status : .pending
+            }
+            return Node(label: milestone.label, status: status)
+        }
+    }
+
+    private func activeNode(in milestones: [Milestone]) -> (index: Int, status: Status) {
+        guard let progress else { return (-1, .pending) }
+        func index(for stage: String) -> Int? {
+            milestones.firstIndex { $0.stages.contains(stage) }
+        }
+        if let current = index(for: progress.stage) {
+            return (current, progress.failed ? .failed : .current)
+        }
+        // A wait keeps the last node reached in this attempt.
+        for step in progress.steps.reversed() {
+            guard let previous = index(for: step.stage) else { continue }
+            switch step.status {
+            case "failed": return (previous, .failed)
+            case "completed": return (previous, .completed)
+            default: return (previous, .current)
+            }
+        }
+        return (-1, .pending)
+    }
+}

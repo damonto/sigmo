@@ -52,7 +52,7 @@ actor DetailFixtureServer {
         case mixedTransferProfiles, unsupportedTransferProfiles, peerApprovals
         case delayedSettings, unavailableSettings, unsupportedSettings, settingsWriteFailure
         case delayedSIMPIN, automations
-        case connectionSetup, connectionScan, connectionScanError, connectionEmptyNetworks, connectionReadFailure, connectionWriteFailure, connectionMBIM, connectionUnlicensed, connectionProxyCheck
+        case connectionSetup, connectionProgress, connectionScan, connectionScanError, connectionEmptyNetworks, connectionReadFailure, connectionWriteFailure, connectionMBIM, connectionUnlicensed, connectionProxyCheck
     }
 
     private var peerApprovalRound = 0
@@ -139,6 +139,20 @@ actor DetailFixtureServer {
         case .connectionSetup:
             connection.wifiRequiresSetup = true
             connection.wifi.emergencyAddressUpdateAvailable = true
+        case .connectionProgress:
+            let now = "2026-11-25T02:30:00Z"
+            connection.wifi.enabled = true
+            connection.wifi.state = "connecting"
+            connection.wifi.progress = .init(attempt: 1, status: "running", stage: "epdg_eap_aka", stageStartedAt: now, retryAt: nil,
+                                             steps: [.init(stage: "epdg_ike_init", status: "completed", startedAt: now),
+                                                     .init(stage: "epdg_eap_aka", status: "running", startedAt: now)],
+                                             lastFailure: nil)
+            connection.volte.connected = false
+            connection.volte.state = "connecting"
+            connection.volte.progress = .init(attempt: 1, status: "waiting", stage: "retry_wait", stageStartedAt: now, retryAt: nil,
+                                              steps: [.init(stage: "ims_pdn", status: "failed", startedAt: now),
+                                                      .init(stage: "retry_wait", status: "waiting", startedAt: now)],
+                                              lastFailure: .init(attempt: 1, stage: "ims_pdn", code: "timeout", at: now))
         case .connectionScan:
             // Keep the busy control visible long enough for UI automation to inspect it.
             connection.scanPolls = 8

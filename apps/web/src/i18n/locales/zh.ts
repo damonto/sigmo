@@ -1417,6 +1417,13 @@ const zh = {
       wifiCallingWebsheetRequired: '需要先完成运营商设置，Wi-Fi Calling 才能连接。',
       wifiCallingWebsheetAction: '打开运营商设置',
       wifiCallingLastError: '最近一次连接失败原因',
+      imsProgress: {
+        label: '连接进度',
+        pending: '未到达',
+        current: '进行中',
+        completed: '已完成',
+        failed: '失败',
+      },
       wifiCallingStatusLoading: '检查中',
       wifiCallingConnected: '已连接',
       wifiCallingConnecting: '连接中',

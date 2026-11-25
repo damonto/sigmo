@@ -60,14 +60,19 @@ struct ProfileConnectionScope {
         if let failure = detail.failure { throw failure }
     }
 
-    // The visible page owns this observer. Settled states make no network requests;
-    // backgrounding and navigation end observation without replaying a write.
-    func observePending(interval: Duration, needsRefresh: () -> Bool, refresh: () async -> Void) async {
+    // The visible page owns this observer. A nil observation pauses polling
+    // during writes or while the user is interacting with a carrier page.
+    func observeConnection(interval: Duration, isPending: () -> Bool?, refresh: () async -> Void) async {
+        let clock = ContinuousClock()
+        let settledInterval = Duration.seconds(10)
+        var nextSettledRead = clock.now + settledInterval
         while available, detail.session.foreground, !Task.isCancelled {
             do { try await Task.sleep(for: interval) }
             catch { return }
             guard available, detail.session.foreground, !Task.isCancelled else { return }
-            if needsRefresh() { await refresh() }
+            guard let pending = isPending(), pending || clock.now >= nextSettledRead else { continue }
+            nextSettledRead = clock.now + settledInterval
+            await refresh()
         }
     }
 }

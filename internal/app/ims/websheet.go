@@ -123,6 +123,9 @@ func (c *coordinator) setWebsheet(modemID string, sessionID uint64, websheetSess
 	if session := c.sessions[modemID]; session != nil && session.id == sessionID {
 		session.websheet = websheetSession
 		session.phase = sessionPhaseWebsheetRequired
+		if session.progress != nil {
+			session.progress.enter(progressCarrierSetup, imsgo.ProgressWaiting, 0)
+		}
 		return true
 	}
 	return false

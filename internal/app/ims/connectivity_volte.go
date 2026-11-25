@@ -40,6 +40,7 @@ func (c *Connectivity) VoLTEStatus(ctx context.Context, modem *mmodem.Modem) (Vo
 	}
 	return VoLTEStatus{
 		VoLTESettings:   settings,
+		Progress:        status.Progress,
 		Connected:       status.Connected,
 		State:           status.State,
 		DurationSeconds: status.DurationSeconds,

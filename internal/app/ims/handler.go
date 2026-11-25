@@ -50,14 +50,15 @@ type WiFiCallingSettingsRequest struct {
 }
 
 type WiFiCallingSettingsResponse struct {
-	LastError                       string           `json:"lastError,omitempty" jsonschema:"most recent IMS connection failure; cleared after successful registration"`
-	Enabled                         bool             `json:"enabled" jsonschema:"whether Wi-Fi Calling is enabled in Sigmo settings"`
-	Underlay                        UnderlaySettings `json:"underlay" jsonschema:"outer network selected for Wi-Fi Calling"`
-	Connected                       bool             `json:"connected" jsonschema:"whether the modem currently has an active Wi-Fi Calling IMS connection"`
-	State                           string           `json:"state" jsonschema:"current Wi-Fi Calling state, such as idle, connecting, connected, or disconnected"`
-	DurationSeconds                 int64            `json:"durationSeconds" jsonschema:"elapsed time of the current Wi-Fi Calling connection in seconds"`
-	EmergencyAddressUpdateAvailable bool             `json:"emergencyAddressUpdateAvailable" jsonschema:"whether an emergency-address update flow is available for this modem"`
-	Websheet                        *websheet.Info   `json:"websheet" jsonschema:"pending carrier interaction page; null when no websheet is pending"`
+	Progress                        *ConnectionProgress `json:"progress,omitempty" jsonschema:"current or most recent Wi-Fi Calling connection attempt and stages"`
+	LastError                       string              `json:"lastError,omitempty" jsonschema:"most recent IMS connection failure; cleared after successful registration"`
+	Enabled                         bool                `json:"enabled" jsonschema:"whether Wi-Fi Calling is enabled in Sigmo settings"`
+	Underlay                        UnderlaySettings    `json:"underlay" jsonschema:"outer network selected for Wi-Fi Calling"`
+	Connected                       bool                `json:"connected" jsonschema:"whether the modem currently has an active Wi-Fi Calling IMS connection"`
+	State                           string              `json:"state" jsonschema:"current Wi-Fi Calling state, such as idle, connecting, connected, or disconnected"`
+	DurationSeconds                 int64               `json:"durationSeconds" jsonschema:"elapsed time of the current Wi-Fi Calling connection in seconds"`
+	EmergencyAddressUpdateAvailable bool                `json:"emergencyAddressUpdateAvailable" jsonschema:"whether an emergency-address update flow is available for this modem"`
+	Websheet                        *websheet.Info      `json:"websheet" jsonschema:"pending carrier interaction page; null when no websheet is pending"`
 }
 
 type VoLTESettingsRequest struct {
@@ -66,12 +67,13 @@ type VoLTESettingsRequest struct {
 }
 
 type VoLTESettingsResponse struct {
-	Enabled         bool     `json:"enabled" jsonschema:"whether VoLTE is enabled in Sigmo settings"`
-	Connected       bool     `json:"connected" jsonschema:"whether the modem currently has an active VoLTE IMS connection"`
-	State           string   `json:"state" jsonschema:"current VoLTE state, such as idle, connecting, connected, or disconnected"`
-	DurationSeconds int64    `json:"durationSeconds" jsonschema:"elapsed time of the current VoLTE connection in seconds"`
-	ModemRegistered bool     `json:"modemRegistered" jsonschema:"whether the modem reports IMS registration"`
-	DataPath        DataPath `json:"dataPath" jsonschema:"data path used for VoLTE traffic, such as qmap, legacy_bam_dmux, or qualcomm_410"`
+	Progress        *ConnectionProgress `json:"progress,omitempty" jsonschema:"current or most recent VoLTE connection attempt and stages"`
+	Enabled         bool                `json:"enabled" jsonschema:"whether VoLTE is enabled in Sigmo settings"`
+	Connected       bool                `json:"connected" jsonschema:"whether the modem currently has an active VoLTE IMS connection"`
+	State           string              `json:"state" jsonschema:"current VoLTE state, such as idle, connecting, connected, or disconnected"`
+	DurationSeconds int64               `json:"durationSeconds" jsonschema:"elapsed time of the current VoLTE connection in seconds"`
+	ModemRegistered bool                `json:"modemRegistered" jsonschema:"whether the modem reports IMS registration"`
+	DataPath        DataPath            `json:"dataPath" jsonschema:"data path used for VoLTE traffic, such as qmap, legacy_bam_dmux, or qualcomm_410"`
 }
 
 // NewHandler creates HTTP handlers for managed IMS connectivity.
@@ -89,6 +91,7 @@ func ReadWiFiCallingSettings(ctx context.Context, modem *mmodem.Modem, connectiv
 		return WiFiCallingSettingsResponse{}, err
 	}
 	return WiFiCallingSettingsResponse{
+		Progress:                        status.Progress,
 		LastError:                       status.LastError,
 		Enabled:                         status.Enabled,
 		Underlay:                        status.Underlay,
@@ -118,6 +121,7 @@ func (ops managedVoLTEOps) readSettings(ctx context.Context, modem *mmodem.Modem
 		modemRegistered = modemStatus.Occupied
 	}
 	return VoLTESettingsResponse{
+		Progress:        status.Progress,
 		Enabled:         status.Enabled,
 		Connected:       status.Connected,
 		State:           status.State,

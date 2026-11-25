@@ -2,10 +2,12 @@ import { onUnmounted, ref, watch, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useVoLTEApi } from '@/apis/volte'
+import type { ConnectionProgress } from '@/types/connectionProgress'
 import type { UpdateVoLTESettingsRequest, VoLTEDataPath, VoLTEQMIDataPath } from '@/types/volte'
 
 type Options = {
   modemId: ComputedRef<string>
+  simId?: ComputedRef<string | undefined>
   enabled: ComputedRef<boolean>
   onSuccess?: (message: string) => void
   onError?: (message: string) => void
@@ -13,19 +15,21 @@ type Options = {
 
 const pollIntervalMs = 5000
 
-export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options) => {
+export const useModemVoLTE = ({ modemId, simId, enabled, onSuccess, onError }: Options) => {
   const { t } = useI18n()
   const api = useVoLTEApi()
 
   const volteEnabled = ref(false)
   const volteConnected = ref(false)
   const volteState = ref('')
+  const volteProgress = ref<ConnectionProgress>()
   const volteDurationSeconds = ref(0)
   const volteModemRegistered = ref(false)
   const volteDataPath = ref<VoLTEDataPath>('qmap')
   const isVoLTELoading = ref(false)
   const isVoLTEUpdating = ref(false)
-  const isVoLTEFetching = ref(false)
+  let settingsEpoch = 0
+  let fetchingEpoch: number | undefined
   const pollTimer = ref<number>()
   const durationTimer = ref<number>()
 
@@ -41,31 +45,35 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     volteEnabled.value = false
     volteConnected.value = false
     volteState.value = ''
+    volteProgress.value = undefined
+    isVoLTELoading.value = false
     volteDurationSeconds.value = 0
     volteModemRegistered.value = false
     volteDataPath.value = 'qmap'
   }
 
   const fetchSettings = async (id: string, silent = false) => {
-    if (!enabled.value || isVoLTEFetching.value) return
-    isVoLTEFetching.value = true
+    const epoch = settingsEpoch
+    if (!enabled.value || fetchingEpoch === epoch) return
+    fetchingEpoch = epoch
     if (!silent) isVoLTELoading.value = true
     try {
       const { data } = await api.settings(id)
-      if (!enabled.value || modemId.value !== id) return
+      if (!enabled.value || modemId.value !== id || epoch !== settingsEpoch) return
       const settings = data.value
       volteEnabled.value = settings?.enabled ?? false
       volteConnected.value = settings?.connected ?? false
       volteState.value = settings?.state ?? ''
+      volteProgress.value = settings?.progress
       volteDurationSeconds.value = settings?.durationSeconds ?? 0
       volteModemRegistered.value = settings?.modemRegistered ?? false
       volteDataPath.value = settings?.dataPath ?? 'qmap'
     } catch (err) {
       console.error('[useModemVoLTE] Failed to load settings:', err)
-      if (!silent) onError?.(t('modemDetail.settings.volteLoadFailed'))
+      if (!silent && epoch === settingsEpoch) onError?.(t('modemDetail.settings.volteLoadFailed'))
     } finally {
-      if (!silent) isVoLTELoading.value = false
-      isVoLTEFetching.value = false
+      if (fetchingEpoch === epoch) fetchingEpoch = undefined
+      if (!silent && epoch === settingsEpoch) isVoLTELoading.value = false
     }
   }
 
@@ -117,14 +125,15 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
   }
 
   watch(
-    [modemId, enabled],
+    [modemId, enabled, () => simId?.value],
     async ([id, canUseVoLTE]) => {
+      const epoch = ++settingsEpoch
       reset()
       if (!id || !canUseVoLTE) {
         return
       }
       await fetchSettings(id)
-      if (!enabled.value || modemId.value !== id) return
+      if (!enabled.value || modemId.value !== id || epoch !== settingsEpoch) return
       pollTimer.value = window.setInterval(() => void fetchSettings(id, true), pollIntervalMs)
     },
     { immediate: true },
@@ -143,12 +152,16 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     { immediate: true },
   )
 
-  onUnmounted(stopTimers)
+  onUnmounted(() => {
+    settingsEpoch += 1
+    stopTimers()
+  })
 
   return {
     volteEnabled,
     volteConnected,
     volteState,
+    volteProgress,
     volteDurationSeconds,
     volteModemRegistered,
     volteDataPath,

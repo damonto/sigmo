@@ -6,11 +6,14 @@ import { useI18n } from 'vue-i18n'
 import VoWiFiIcon from '@/components/modem/VoWiFiIcon.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import type { ConnectionProgress } from '@/types/connectionProgress'
+import ConnectionProgressNodes from './ConnectionProgressNodes.vue'
 
 const props = defineProps<{
   enabled: boolean
   connected: boolean
   state: string
+  progress?: ConnectionProgress
   lastError?: string
   durationSeconds: number
   isLoading: boolean
@@ -27,10 +30,14 @@ const { t } = useI18n()
 const normalizedState = computed(() => {
   if (props.isLoading) return 'loading'
   if (!props.enabled) return 'disabled'
-  if (props.connected || props.state === 'connected') return 'connected'
-  if (props.isReconnecting || props.state === 'connecting') return 'connecting'
   if (props.state === 'waiting_for_uplink') return 'waiting_for_uplink'
   if (props.state === 'websheet_required') return 'websheet_required'
+  if (props.progress?.status === 'failed') return 'disconnected'
+  if (props.progress?.status === 'running' || props.progress?.status === 'waiting') {
+    return 'connecting'
+  }
+  if (props.connected || props.state === 'connected') return 'connected'
+  if (props.isReconnecting || props.state === 'connecting') return 'connecting'
   return 'disconnected'
 })
 
@@ -91,7 +98,9 @@ const statusTone = computed(() => {
   }
 })
 
-const durationLabel = computed(() => formatDuration(props.connected ? props.durationSeconds : 0))
+const durationLabel = computed(() =>
+  formatDuration(statusTone.value === 'connected' ? props.durationSeconds : 0),
+)
 
 const formatDuration = (seconds: number) => {
   const normalized = Math.max(0, Math.floor(seconds))
@@ -119,13 +128,13 @@ const formatDuration = (seconds: number) => {
   >
     <CardContent class="p-0">
       <p
-        v-if="props.lastError && props.enabled && !props.connected"
+        v-if="props.lastError && props.enabled && !props.connected && !props.progress"
         class="break-words border-b p-4 text-sm text-destructive"
         role="status"
       >
         {{ t('modemDetail.settings.wifiCallingLastError') }}: {{ props.lastError }}
       </p>
-      <div class="flex items-start gap-3 border-b border-border/70 p-4">
+      <div class="flex items-start gap-3 p-4">
         <div
           class="relative flex size-11 shrink-0 items-center justify-center rounded-full"
           :class="
@@ -169,6 +178,12 @@ const formatDuration = (seconds: number) => {
           >
             {{ statusLabel }}
           </p>
+          <ConnectionProgressNodes
+            v-if="props.enabled && !props.isLoading"
+            access="wifiCalling"
+            :connected="statusTone === 'connected'"
+            :progress="props.progress"
+          />
           <p
             v-if="statusDescription"
             class="truncate text-sm text-muted-foreground"
@@ -198,7 +213,9 @@ const formatDuration = (seconds: number) => {
         </Button>
       </div>
 
-      <div class="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+      <div
+        class="flex items-center justify-between gap-3 border-t border-border/70 px-4 py-3 text-sm"
+      >
         <span class="text-muted-foreground">
           {{ t('modemDetail.settings.wifiCallingDuration') }}
         </span>

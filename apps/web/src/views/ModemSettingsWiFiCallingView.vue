@@ -36,6 +36,7 @@ const {
   settingsWiFiCallingUnderlay,
   settingsWiFiCallingConnected,
   settingsWiFiCallingState,
+  settingsWiFiCallingProgress,
   settingsWiFiCallingLastError,
   settingsWiFiCallingDurationSeconds,
   settingsWiFiCallingEmergencyAddressUpdateAvailable,
@@ -95,6 +96,7 @@ const closeWiFiCallingEmergencyAddressWebsheet = () => {
         :enabled="settingsWiFiCallingEnabled"
         :connected="settingsWiFiCallingConnected"
         :state="settingsWiFiCallingState"
+        :progress="settingsWiFiCallingProgress"
         :duration-seconds="settingsWiFiCallingDurationSeconds"
         :last-error="settingsWiFiCallingLastError"
         :is-loading="isWiFiCallingSettingsLoading"

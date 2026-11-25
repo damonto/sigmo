@@ -217,6 +217,32 @@ struct WiFiProxyCheck: Decodable, Sendable {
     let dns: Step
 }
 
+struct IMSConnectionProgress: Codable, Sendable, Equatable {
+    struct Step: Codable, Sendable, Equatable {
+        let stage: String
+        let status: String
+        let startedAt: String
+    }
+
+    struct Failure: Codable, Sendable, Equatable {
+        let attempt: Int
+        let stage: String
+        let code: String
+        let at: String
+    }
+
+    let attempt: Int
+    let status: String
+    let stage: String
+    let stageStartedAt: String
+    let retryAt: String?
+    let steps: [Step]
+    let lastFailure: Failure?
+
+    var pending: Bool { status == "running" || status == "waiting" }
+    var failed: Bool { status == "failed" }
+}
+
 struct DetailWiFiSettings: Codable, Sendable, Equatable {
     var enabled: Bool
     var underlay: WiFiUnderlay
@@ -226,15 +252,18 @@ struct DetailWiFiSettings: Codable, Sendable, Equatable {
     var durationSeconds: Int64 = 0
     var emergencyAddressUpdateAvailable = false
     var websheet: CarrierWebsheet? = nil
+    var progress: IMSConnectionProgress? = nil
 
     var statusKey: String {
         if !enabled { return "modem.value.disabled" }
+        if state == "waiting_for_uplink" { return "connection.waitingForUplink" }
+        if state == "websheet_required" { return "connection.setupRequired" }
+        if progress?.pending == true { return "modem.value.connecting" }
+        if progress?.failed == true { return "common.disconnected" }
         if connected { return "common.connected" }
         switch state {
         case "connected": return "common.connected"
         case "connecting": return "modem.value.connecting"
-        case "waiting_for_uplink": return "connection.waitingForUplink"
-        case "websheet_required": return "connection.setupRequired"
         case "idle", "disconnected": return "common.disconnected"
         default: return "common.unknown"
         }
@@ -268,12 +297,15 @@ struct VoLTESettings: Codable, Sendable, Equatable {
     var durationSeconds: Int64
     var modemRegistered: Bool
     var dataPath: String
+    var progress: IMSConnectionProgress? = nil
 
     var modemManaged: Bool { !enabled && modemRegistered }
     var knownDataPath: Bool { dataPath == "mbim" || VoLTEDataPath(rawValue: dataPath) != nil }
     var statusKey: String {
         if modemManaged { return "connection.modemManaged" }
         if !enabled { return "modem.value.disabled" }
+        if progress?.pending == true { return "modem.value.connecting" }
+        if progress?.failed == true { return "common.disconnected" }
         if connected { return "common.connected" }
         switch state {
         case "connected": return "common.connected"

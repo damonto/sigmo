@@ -101,20 +101,21 @@ final class WiFiCallingState {
         }
     }
 
-    func reload() async {
+    func reload(refreshModem: Bool = true) async {
         defer { clearIfUnavailable() }
         guard scope.available, !Task.isCancelled, readInFlight == nil else { return }
-        await load()
+        await load(refreshModem: refreshModem)
         guard !Task.isCancelled else { return }
         failure = loadFailure
         await presentSetupIfNeeded()
     }
 
     func observePending(interval: Duration = .seconds(2)) async {
-        await scope.observePending(interval: interval, needsRefresh: {
-            self.readInFlight == nil && !self.busy && self.websheet == nil && self.settings?.enabled == true
-                && ["connecting", "waiting_for_uplink"].contains(self.settings?.state ?? "")
-        }, refresh: { await self.reload() })
+        await scope.observeConnection(interval: interval, isPending: {
+            guard self.readInFlight == nil, !self.busy, self.websheet == nil,
+                  let settings = self.settings, settings.enabled else { return nil }
+            return settings.progress?.pending == true || ["connecting", "waiting_for_uplink"].contains(settings.state)
+        }, refresh: { await self.reload(refreshModem: false) })
     }
 
     func setEnabled(_ enabled: Bool) async {

@@ -1461,6 +1461,13 @@ const en = {
       wifiCallingWebsheetRequired: 'Carrier setup is required before Wi-Fi Calling can connect.',
       wifiCallingWebsheetAction: 'Open carrier setup',
       wifiCallingLastError: 'Last connection error',
+      imsProgress: {
+        label: 'Connection progress',
+        pending: 'Not reached',
+        current: 'In progress',
+        completed: 'Completed',
+        failed: 'Failed',
+      },
       wifiCallingStatusLoading: 'Checking',
       wifiCallingConnected: 'Connected',
       wifiCallingConnecting: 'Connecting',

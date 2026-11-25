@@ -1476,3 +1476,8 @@
 "automation.result.restored" = "Original line restored";
 "automation.result.restore_failed" = "Could not restore the original line";
 "automation.result.restore_skipped" = "The active line changed during the task";
+"connection.imsProgress.label" = "Connection progress";
+"connection.imsProgress.pending" = "Not reached";
+"connection.imsProgress.current" = "In progress";
+"connection.imsProgress.completed" = "Completed";
+"connection.imsProgress.failed" = "Failed";

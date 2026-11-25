@@ -1,3 +1,4 @@
+import type { ConnectionProgress } from '@/types/connectionProgress'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 import type { Reminder } from '@/types/reminder'
 
@@ -114,6 +115,7 @@ export type WiFiCallingSettingsRequest = {
 }
 
 export type WiFiCallingSettingsResponse = Omit<WiFiCallingSettings, 'underlay'> & {
+  progress?: ConnectionProgress
   lastError?: string
   underlay: WiFiCallingUnderlay
   connected: boolean

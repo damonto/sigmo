@@ -24,10 +24,12 @@ struct VoLTEView: View {
             } footer: { Text("connection.volteHint") }
             if let settings = state.settings {
                 Section {
-                    DetailValue(title: "connection.status", value: detailText(settings.statusKey))
-                        .accessibilityIdentifier("volteStatus")
+                    IMSConnectionStatusRow(access: .volte, statusKey: settings.statusKey,
+                                           identifier: "volteStatus", enabled: settings.enabled,
+                                           connected: settings.connected, progress: settings.progress)
                     ConnectionDurationRow(seconds: settings.modemManaged ? nil : settings.durationSeconds,
-                                          observedAt: state.observedAt, running: settings.enabled && settings.connected)
+                                          observedAt: state.observedAt, running: settings.enabled && settings.connected
+                                            && settings.progress?.pending != true && settings.progress?.failed != true)
                 }
                 Section {
                     NavigationLink {

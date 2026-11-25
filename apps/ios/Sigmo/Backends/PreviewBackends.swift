@@ -68,6 +68,7 @@ enum PreviewBackends {
                 case "detail-physical-pin-loading": fixture = .delayedSIMPIN
                 case "detail-esim-automation", "detail-physical-automation": fixture = .automations
                 case "detail-connection-setup": fixture = .connectionSetup
+                case "detail-connection-progress": fixture = .connectionProgress
                 case "detail-connection-scan": fixture = .connectionScan
                 case "detail-connection-proxy-check": fixture = .connectionProxyCheck
                 case "detail-connection-scan-error": fixture = .connectionScanError

@@ -8,13 +8,16 @@ final class ConnectionFlowTests: XCTestCase {
 
     private func launch(_ scenario: String = "detail", chinese: Bool = false, large: Bool = false, dark: Bool = false,
                         profile: String = "se-a:8986000000000000001") -> XCUIApplication {
+        XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
-        app.launchEnvironment = ["SIGMO_UI_SCENARIO": scenario, "SIGMO_UI_RESET": "1"]
+        app.launchEnvironment = ["SIGMO_UI_SCENARIO": scenario, "SIGMO_UI_RESET": "1", "SIGMO_UI_APPEARANCE": dark ? "dark" : "light"]
         app.launchArguments = ["-AppleLanguages", chinese ? "(zh-Hans)" : "(en)", "-AppleLocale", chinese ? "zh_CN" : "en_US",
-                               "-AppleInterfaceStyle", large || dark ? "Dark" : "Light",
                                "-UIPreferredContentSizeCategoryName", large ? "UICTContentSizeCategoryAccessibilityXXXL" : "UICTContentSizeCategoryL"]
         app.launch()
-        tap(app.descendants(matching: .any)["modem-00000000-0000-0000-0000-000000000001-device-1"].firstMatch, in: app)
+        let modem = app.buttons["modem-00000000-0000-0000-0000-000000000001-device-1"]
+        XCTAssertTrue(modem.waitForExistence(timeout: 10), "Device card did not load")
+        tap(modem, in: app)
+        XCTAssertTrue(app.tabBars.buttons["simcard"].waitForExistence(timeout: 5), "Device details did not open")
         tap(app.buttons["profileActions-" + profile], in: app)
         return app
     }
@@ -105,9 +108,9 @@ final class ConnectionFlowTests: XCTestCase {
         print("CONNECTION_AUDIT_BEGIN \(name)")
         capture(app, name: name)
         try app.performAccessibilityAudit(for: types) { issue in
-            print("CONNECTION_AUDIT \(name): \(issue.compactDescription): \(issue.detailedDescription)")
-            print(issue.element?.debugDescription ?? app.debugDescription)
-            return false
+            let element = issue.element.map { "\($0.identifier) \($0.label)" } ?? ""
+            XCTFail("\(name): \(issue.compactDescription): \(issue.detailedDescription) \(element)")
+            return true
         }
         print("CONNECTION_AUDIT_PASS \(name)")
     }
@@ -188,6 +191,26 @@ final class ConnectionFlowTests: XCTestCase {
         app.alerts.buttons["OK"].tap()
         expectToggle("internetDefaultRoute", value: "0", in: app)
         capture(app, name: "Connection preference rollback")
+    }
+
+    func testIMSConnectionProgress() {
+        let app = launch("detail-connection-progress")
+        tap(app.buttons["profileWiFiCalling"], in: app)
+        let aka = app.descendants(matching: .any)["imsProgressNode-AKA"].firstMatch
+        XCTAssertTrue(aka.waitForExistence(timeout: 10))
+        XCTAssertEqual(aka.value as? String, "In progress")
+        let epdg = app.descendants(matching: .any)["imsProgressNode-ePDG"].firstMatch
+        XCTAssertEqual(epdg.value as? String, "Completed")
+        let ipsec = app.descendants(matching: .any)["imsProgressNode-IPsec"].firstMatch
+        XCTAssertEqual(ipsec.value as? String, "Not reached")
+        XCTAssertEqual(epdg.frame.midY, ipsec.frame.midY, accuracy: 1)
+        back(app)
+
+        tap(app.buttons["profileVoLTE"], in: app)
+        let pdn = app.descendants(matching: .any)["imsProgressNode-IMS PDN"].firstMatch
+        XCTAssertTrue(pdn.waitForExistence(timeout: 10))
+        XCTAssertEqual(pdn.value as? String, "Failed")
+        XCTAssertEqual(aka.value as? String, "Not reached")
     }
 
     func testWiFiCallingConfirmationCarrierPagesAndSessions() {
@@ -375,11 +398,13 @@ final class ConnectionFlowTests: XCTestCase {
         capture(empty, name: "Empty network search")
     }
 
-    func testChineseLargeTextDarkConnectionPages() throws {
+    func testChineseDarkConnectionPagesDynamicTypeSweep() throws {
         // textClipped cycles through Dynamic Type sizes. Start that sweep at the
         // default size so shrinking a scrolled Form does not recycle its target rows.
-        // Separately verify maximum-size startup and fully visible, scrollable text.
         try auditConnectionPages(large: false)
+    }
+
+    func testChineseLargeTextDarkConnectionPages() throws {
         try auditConnectionPages(large: true)
     }
 
@@ -388,12 +413,24 @@ final class ConnectionFlowTests: XCTestCase {
         defer { app.terminate() }
         let variant = large ? "Chinese maximum text" : "Chinese Dynamic Type sweep"
         let types: XCUIAccessibilityAuditType = large ? [.sufficientElementDescription] : [.sufficientElementDescription, .textClipped]
+        let progressNodes = ["profileWiFiCalling": "IPsec", "profileVoLTE": "IMS PDN"]
         capture(app, name: variant + " profile connection entries")
         for (entry, control) in [("profileNetworkSelection", "networkAutomatic"), ("profileInternet", "internetConnected"),
                                  ("profileWiFiCalling", "wifiCallingEnabled"), ("profileVoLTE", "volteEnabled")] {
             tap(app.buttons[entry], in: app)
             XCTAssertTrue(app.switches[control].waitForExistence(timeout: 10))
             XCTAssertGreaterThanOrEqual(app.switches[control].frame.height, 44)
+            if entry == "profileWiFiCalling" {
+                toggle(control, in: app)
+                tap(app.alerts.buttons["confirmWiFiCalling"].firstMatch, in: app)
+                expectToggle(control, value: "1", in: app)
+            }
+            if let label = progressNodes[entry] {
+                let node = app.descendants(matching: .any)["imsProgressNode-" + label].firstMatch
+                XCTAssertTrue(node.waitForExistence(timeout: 5))
+                XCTAssertEqual(node.value as? String, "已完成")
+                if large { revealFullText(node, in: app) }
+            }
             try audit(app, name: variant + " " + entry, types: types)
             if entry == "profileInternet" {
                 if large {

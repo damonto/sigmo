@@ -921,7 +921,7 @@ func TestResetManagedVoLTERestoresInternet(t *testing.T) {
 				ctx, cancel = context.WithCancel(ctx)
 				tt.internet.cancel = cancel
 			}
-			err := resetManagedVoLTE(ctx, &mmodem.Modem{}, device, tt.internet)
+			err := resetManagedVoLTE(ctx, &mmodem.Modem{}, device, tt.internet, nil)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("resetManagedVoLTE() error = %v, want %v", err, tt.wantErr)
 			}

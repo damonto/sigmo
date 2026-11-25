@@ -1476,3 +1476,8 @@
 "automation.result.restored" = "已恢复原线路";
 "automation.result.restore_failed" = "无法恢复原线路";
 "automation.result.restore_skipped" = "执行期间线路已切换";
+"connection.imsProgress.label" = "连接进度";
+"connection.imsProgress.pending" = "未到达";
+"connection.imsProgress.current" = "进行中";
+"connection.imsProgress.completed" = "已完成";
+"connection.imsProgress.failed" = "失败";

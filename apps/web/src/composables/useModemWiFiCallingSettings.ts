@@ -1,6 +1,8 @@
 import { computed, nextTick, onUnmounted, ref, watch, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import type { ConnectionProgress } from '@/types/connectionProgress'
+
 import { useModemApi } from '@/apis/modem'
 import type {
   WiFiCallingSettings,
@@ -47,6 +49,7 @@ export const useModemWiFiCallingSettings = ({
   )
   const settingsWiFiCallingConnected = ref(false)
   const settingsWiFiCallingState = ref('')
+  const settingsWiFiCallingProgress = ref<ConnectionProgress>()
   const settingsWiFiCallingLastError = ref('')
   const settingsWiFiCallingDurationSeconds = ref(0)
   const settingsWiFiCallingEmergencyAddressUpdateAvailable = ref(false)
@@ -103,6 +106,7 @@ export const useModemWiFiCallingSettings = ({
     isWiFiCallingSettingsLoading.value = false
     settingsWiFiCallingConnected.value = false
     settingsWiFiCallingState.value = ''
+    settingsWiFiCallingProgress.value = undefined
     settingsWiFiCallingLastError.value = ''
     settingsWiFiCallingDurationSeconds.value = 0
     settingsWiFiCallingEmergencyAddressUpdateAvailable.value = false
@@ -139,6 +143,7 @@ export const useModemWiFiCallingSettings = ({
         }
         settingsWiFiCallingConnected.value = payload.connected ?? false
         settingsWiFiCallingState.value = payload.state ?? ''
+        settingsWiFiCallingProgress.value = payload.progress
         settingsWiFiCallingLastError.value = payload.lastError ?? ''
         settingsWiFiCallingDurationSeconds.value = payload.durationSeconds ?? 0
         settingsWiFiCallingEmergencyAddressUpdateAvailable.value =
@@ -207,21 +212,25 @@ export const useModemWiFiCallingSettings = ({
     if (!enabled.value || !targetId) return
     if (isWiFiCallingReconnecting.value) return
     isWiFiCallingReconnecting.value = true
+    const epoch = settingsRequestEpoch
     const previousConnected = settingsWiFiCallingConnected.value
     const previousState = settingsWiFiCallingState.value
+    const previousProgress = settingsWiFiCallingProgress.value
     const previousDurationSeconds = settingsWiFiCallingDurationSeconds.value
     settingsWiFiCallingConnected.value = false
+    settingsWiFiCallingProgress.value = undefined
     settingsWiFiCallingState.value = 'connecting'
     settingsWiFiCallingDurationSeconds.value = 0
     let reconnectStarted = false
     try {
       await modemApi.createWiFiCallingSession(targetId)
       reconnectStarted = true
-      await fetchSettings(targetId)
+      if (epoch === settingsRequestEpoch) await fetchSettings(targetId)
     } catch (err) {
-      if (!reconnectStarted) {
+      if (!reconnectStarted && epoch === settingsRequestEpoch) {
         settingsWiFiCallingConnected.value = previousConnected
         settingsWiFiCallingState.value = previousState
+        settingsWiFiCallingProgress.value = previousProgress
         settingsWiFiCallingDurationSeconds.value = previousDurationSeconds
       }
       console.error('[useModemWiFiCallingSettings] Failed to reconnect Wi-Fi Calling:', err)
@@ -235,19 +244,25 @@ export const useModemWiFiCallingSettings = ({
     if (!enabled.value || !targetId) return
     if (isWiFiCallingDisconnecting.value) return
     isWiFiCallingDisconnecting.value = true
+    const epoch = settingsRequestEpoch
     const previousConnected = settingsWiFiCallingConnected.value
     const previousState = settingsWiFiCallingState.value
+    const previousProgress = settingsWiFiCallingProgress.value
     const previousDurationSeconds = settingsWiFiCallingDurationSeconds.value
     settingsWiFiCallingConnected.value = false
+    settingsWiFiCallingProgress.value = undefined
     settingsWiFiCallingState.value = 'disconnected'
     settingsWiFiCallingDurationSeconds.value = 0
     try {
       await modemApi.deleteWiFiCallingSession(targetId)
-      await fetchSettings(targetId)
+      if (epoch === settingsRequestEpoch) await fetchSettings(targetId)
     } catch (err) {
-      settingsWiFiCallingConnected.value = previousConnected
-      settingsWiFiCallingState.value = previousState
-      settingsWiFiCallingDurationSeconds.value = previousDurationSeconds
+      if (epoch === settingsRequestEpoch) {
+        settingsWiFiCallingConnected.value = previousConnected
+        settingsWiFiCallingState.value = previousState
+        settingsWiFiCallingProgress.value = previousProgress
+        settingsWiFiCallingDurationSeconds.value = previousDurationSeconds
+      }
       console.error('[useModemWiFiCallingSettings] Failed to disconnect Wi-Fi Calling:', err)
     } finally {
       isWiFiCallingDisconnecting.value = false
@@ -335,6 +350,7 @@ export const useModemWiFiCallingSettings = ({
     settingsWiFiCallingUnderlay,
     settingsWiFiCallingConnected,
     settingsWiFiCallingState,
+    settingsWiFiCallingProgress,
     settingsWiFiCallingLastError,
     settingsWiFiCallingDurationSeconds,
     settingsWiFiCallingEmergencyAddressUpdateAvailable,
