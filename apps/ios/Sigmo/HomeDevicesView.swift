@@ -115,36 +115,24 @@ struct HomeDevicesView: View {
     }
 
     private var list: some View {
-        List {
-            if !store.settings.backends.isEmpty {
-                let sessions = store.orderedSessions(backendID: backendID)
-                let devices = store.homeDevices(backendID: backendID, search: search)
-                let groups = Dictionary(grouping: devices, by: { $0.session.id })
-                if devices.isEmpty && !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    ContentUnavailableView.search(text: search)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .accessibilityIdentifier("homeSearchEmpty")
-                } else if devices.isEmpty && !sessions.isEmpty && sessions.allSatisfy({ !$0.isRefreshing }) {
-                    ContentUnavailableView("devices.empty", systemImage: "simcard")
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .accessibilityIdentifier("homeDevicesEmpty")
-                }
-                ForEach(sessions) { session in
-                    if let devices = groups[session.id] {
-                        Section {
-                            ForEach(devices) { device in
-                                deviceCard(device)
-                            }
-                        } header: {
-                            Text(session.configuration.name)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .textCase(nil)
-                                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
-                                .accessibilityIdentifier("backendHeading-\(session.id)")
+        let sessions = store.orderedSessions(backendID: backendID)
+        let devices = store.homeDevices(backendID: backendID, search: search)
+        let groups = Dictionary(grouping: devices, by: { $0.session.id })
+
+        return List {
+            ForEach(sessions) { session in
+                if let devices = groups[session.id] {
+                    Section {
+                        ForEach(devices) { device in
+                            deviceCard(device)
                         }
+                    } header: {
+                        Text(session.configuration.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .textCase(nil)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+                            .accessibilityIdentifier("backendHeading-\(session.id)")
                     }
                 }
             }
@@ -153,6 +141,19 @@ struct HomeDevicesView: View {
         .listSectionSpacing(16)
         .scrollContentBackground(.hidden)
         .contentMargins(.top, 0, for: .scrollContent)
+        .overlay {
+            if !store.settings.backends.isEmpty, devices.isEmpty {
+                if !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ContentUnavailableView.search(text: search)
+                        .accessibilityIdentifier("homeSearchEmpty")
+                        .allowsHitTesting(false)
+                } else if !sessions.isEmpty && sessions.allSatisfy({ !$0.isRefreshing }) {
+                    ContentUnavailableView("devices.empty", systemImage: "simcard")
+                        .accessibilityIdentifier("homeDevicesEmpty")
+                        .allowsHitTesting(false)
+                }
+            }
+        }
         .scrollDismissesKeyboard(.interactively)
         .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "home.search")
         .textInputAutocapitalization(.never)

@@ -137,9 +137,11 @@ final class MessagesTests: XCTestCase {
         let historical = try XCTUnwrap(list.items.first { $0.id == "conversation-inactive" })
         let thread = list.thread(historical)
         thread.draft = "Reply using current SIM"
+        XCTAssertEqual(thread.replyAvailability, .inactive)
         XCTAssertFalse(thread.canSend)
         XCTAssertTrue(thread.canUseActive)
         thread.useActiveProfile()
+        XCTAssertEqual(thread.replyAvailability, .available)
         XCTAssertTrue(thread.canSend)
         await thread.send()
         XCTAssertNil(thread.failure)

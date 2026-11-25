@@ -30,43 +30,43 @@ struct MessageTimeline: View {
     var visibilityThreshold = 0.5
     let visible: (Int64, Bool) -> Void
     let refresh: () async -> Void
-    @State private var atBottom = true
+    @State private var scrollPosition = ScrollPosition(idType: Int64.self)
+    @State private var isAtBottom = true
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 8) {
-                    if loading && messages.isEmpty { ProgressView("messages.loading").padding() }
-                    if let older {
-                        Button("communication.older", action: older).disabled(loading).padding()
-                    }
-                    ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                if loading && messages.isEmpty { ProgressView("messages.loading").padding() }
+                if let older {
+                    Button("communication.older", action: older).disabled(loading).padding()
+                }
+                ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+                    VStack(spacing: 8) {
                         if let date = message.timestamp, startsDay(at: index) {
                             Text(date, format: .dateTime.year().month(.abbreviated).day())
                                 .font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.vertical, 12)
                         }
                         MessageBubble(message: message)
-                            .id(message.id)
                             .onScrollVisibilityChange(threshold: visibilityThreshold) { visible(message.id, $0) }
                     }
-                    Color.clear.frame(height: 1).id("bottom")
-                        .onScrollVisibilityChange { atBottom = $0 }
-                }
-                .padding(.horizontal, 14).padding(.vertical, 8)
-            }
-            .defaultScrollAnchor(.bottom)
-            .refreshable { await refresh() }
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: messages.last?.id) { old, _ in
-                if old == nil || atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if !atBottom && !messages.isEmpty {
-                    Button("messages.latest", systemImage: "arrow.down") { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-                        .buttonStyle(.glass).buttonBorderShape(.capsule).padding()
                 }
             }
+            .scrollTargetLayout()
+            .padding(.horizontal, 14).padding(.vertical, 8)
         }
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.bottom, for: .alignment)
+        .defaultScrollAnchor(isAtBottom ? .bottom : nil, for: .sizeChanges)
+        .scrollPosition($scrollPosition, anchor: .bottom)
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            let insets = geometry.contentInsets
+            let bottom = max(-insets.top, geometry.contentSize.height + insets.bottom - geometry.containerSize.height)
+            return geometry.contentOffset.y >= bottom - 1
+        } action: { _, atBottom in
+            isAtBottom = atBottom
+        }
+        .refreshable { await refresh() }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private func startsDay(at index: Int) -> Bool {

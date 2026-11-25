@@ -3,6 +3,10 @@ import Observation
 
 @MainActor @Observable
 final class MessageThreadState {
+    enum ReplyAvailability {
+        case available, inactive, locked, unavailable
+    }
+
     let session: BackendSession
     private(set) var conversation: SMSConversation
     var draft = ""
@@ -33,10 +37,13 @@ final class MessageThreadState {
     var sendingProfileID: String { replacementProfileID ?? conversation.profileId }
     var canUseActive: Bool { modem.map { !$0.sim.identifier.isEmpty && $0.state != "locked" && $0.sim.identifier != sendingProfileID } ?? false }
     func useActiveProfile() { replacementProfileID = modem?.sim.identifier }
-    var canSend: Bool {
-        session.canAccessDevices && !conversation.modemId.isEmpty &&
-        modem?.sim.identifier == sendingProfileID && modem?.state != "locked"
+    var replyAvailability: ReplyAvailability {
+        guard session.canAccessDevices, !conversation.modemId.isEmpty, let modem else { return .unavailable }
+        if modem.state == "locked" { return .locked }
+        if modem.sim.identifier.isEmpty || modem.sim.identifier != sendingProfileID { return .inactive }
+        return .available
     }
+    var canSend: Bool { replyAvailability == .available }
 
     func load(more: Bool = false) async {
         guard !sending, !Task.isCancelled, session.canAccessDevices, !more || (!loading && !cursor.isEmpty) else { return }

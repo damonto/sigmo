@@ -22,6 +22,7 @@
 "common.save" = "保存";
 "common.done" = "完成";
 "common.ok" = "好";
+"common.retry" = "重试";
 "common.refresh" = "刷新";
 "common.working" = "正在处理…";
 "common.dismiss" = "关闭";
@@ -577,9 +578,7 @@
 "detail.networkStatus" = "网络状态";
 "detail.networkNotRegistered" = "未注册";
 "detail.mobileData" = "移动数据";
-"detail.networkDetails" = "网络详情";
 "detail.registeredNetwork" = "注册网络";
-"detail.registeredOperatorCode" = "注册运营商代码";
 "detail.simOperator" = "SIM 运营商";
 "detail.trafficDownload" = "下载";
 "detail.trafficUpload" = "上传";
@@ -741,7 +740,11 @@
 "connection.status" = "状态";
 "connection.duration" = "连接时长";
 "connection.apn" = "APN";
-"connection.options" = "连接选项";
+"connection.apnAccessibility" = "接入点名称";
+"connection.internetConnection" = "互联网连接";
+"connection.internetDraftHint" = "所做更改将在下次连接时应用。";
+"connection.networkConfiguration" = "网络配置";
+"connection.callSettings" = "通话设置";
 "connection.details" = "连接详情";
 "connection.optional" = "选填";
 "connection.username" = "用户名";
@@ -787,6 +790,8 @@
 "connection.emergencyAddress" = "更新紧急呼叫地址";
 "connection.uplink" = "联网出口";
 "connection.wifiProxy.title" = "SOCKS5 代理";
+"connection.wifiProxy.unsupported" = "此 Sigmo 服务端不支持配置 SOCKS5 代理。";
+"connection.wifiProxy.results" = "测试结果";
 "connection.wifiProxy.add" = "添加代理";
 "connection.wifiProxy.edit" = "编辑代理";
 "connection.wifiProxy.selection" = "选择代理";
@@ -798,9 +803,7 @@
 "connection.wifiProxy.auth" = "用户名和密码认证";
 "connection.wifiProxy.username" = "用户名";
 "connection.wifiProxy.password" = "密码";
-"connection.wifiProxy.save" = "保存代理";
 "connection.wifiProxy.cancel" = "取消";
-"connection.wifiProxy.retry" = "重试";
 "connection.wifiProxy.server" = "SOCKS5 服务端";
 "connection.wifiProxy.tcp" = "TCP 出口 IP";
 "connection.wifiProxy.relay" = "UDP 中继地址";
@@ -811,6 +814,7 @@
 "connection.wifiProxy.saveFailed" = "无法保存 SOCKS5 代理。";
 "connection.wifiProxy.checkFailed" = "无法测试 SOCKS5 代理。";
 "connection.wifiProxy.useProxy" = "使用 SOCKS5 代理";
+"connection.wifiProxy.directUplinkHint" = "关闭 SOCKS5 代理后可选择直连出口。";
 "connection.wifiProxy.switchProxy" = "切换代理";
 "connection.wifiProxy.namePlaceholder" = "办公室代理";
 "connection.wifiProxy.hostPlaceholder" = "proxy.example.com";
@@ -834,7 +838,7 @@
 "connection.uplinkUnavailable" = "未连接或不可用";
 "connection.uplinkHint" = "使用 Sigmo 系统网络，或同一 Sigmo 中设备的互联网连接。更改出口会重新连接 Wi-Fi 通话。";
 "connection.enableVoLTE" = "启用 VoLTE";
-"connection.volteHint" = "由 Sigmo 管理此设备的 VoLTE，下方显示当前连接状态。";
+"connection.volteHint" = "由 Sigmo 管理此设备的 VoLTE。";
 "connection.modemManaged" = "由设备管理";
 "connection.dataPath" = "数据通道";
 "connection.dataPathHint" = "关闭 VoLTE 后可更改数据通道。";
@@ -889,7 +893,11 @@
 "messages.lineSuffix" = "尾号 %@ 的线路";
 "messages.resultUnknown" = "发送结果尚未确认，请刷新核对后再决定是否重发。";
 "messages.inactiveLine" = "回复前请启用此 SIM 线路。你仍可查看该线路的历史消息。";
-"messages.latest" = "最新消息";
+"messages.inactiveLine.title" = "SIM 线路未启用";
+"messages.inactiveLine.detail" = "启用此线路后即可回复。";
+"messages.replyLocked" = "解锁此 SIM 线路后即可回复。";
+"messages.replyUnavailable.title" = "暂时无法回复";
+"messages.replyUnavailable.detail" = "请检查 Sigmo 连接。";
 "messages.loading" = "正在加载消息…";
 "messages.new" = "新信息";
 "messages.recipient" = "电话号码";
@@ -916,6 +924,7 @@
 "messages.search" = "搜索号码或信息";
 "messages.unknownSender" = "未知发件人";
 "messages.unread" = "未读";
+"messages.unreadCount %lld" = "%lld 条未读";
 "push.allowed" = "已允许";
 "push.denied" = "未允许";
 "push.enabled" = "允许通知";

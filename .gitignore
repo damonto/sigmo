@@ -34,6 +34,7 @@ data/
 .mcp.json
 .claude
 .codex/
+.codex*
 .cache/
 docs/
 

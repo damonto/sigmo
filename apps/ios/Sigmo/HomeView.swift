@@ -73,10 +73,12 @@ struct HomeView: View {
 
     private var homeTabs: some View {
         let session = communicationSession
+        let unreadCount = session?.unreadMessageCount ?? 0
         return TabView(selection: $homeTab) {
             Tab("communication.devices", systemImage: "server.rack", value: HomeTab.devices) { homeNavigation }
             Tab("communication.messages", systemImage: "message", value: HomeTab.messages) { communicationTab(.messages, session: session) }
-                .badge(session?.unreadMessageCount ?? 0)
+                .badge(unreadCount)
+                .accessibilityValue("messages.unreadCount \(unreadCount)", isEnabled: unreadCount > 0)
             Tab("communication.calls", systemImage: "phone", value: HomeTab.calls) { communicationTab(.calls, session: session) }
             Tab("communication.contacts", systemImage: "person.crop.circle", value: HomeTab.contacts) { communicationTab(.contacts, session: session) }
         }
@@ -104,6 +106,7 @@ struct HomeView: View {
                 ContentUnavailableView("backends.empty.title", systemImage: "server.rack",
                                        description: Text("backends.empty.description"))
                     .navigationTitle(section.title)
+                    .navigationBarTitleDisplayMode(.inline)
             }
         }
         .id(session.map {

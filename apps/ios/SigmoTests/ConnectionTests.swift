@@ -741,9 +741,7 @@ final class ConnectionTests: XCTestCase {
         await server.setConnectionFixture(fixture)
         await state.loadPublic()
         XCTAssertNotNil(state.publicFailure)
-        XCTAssertEqual(state.failure, state.publicFailure)
-        state.failure = nil
-        XCTAssertNotNil(state.publicFailure)
+        XCTAssertNil(state.failure)
         XCTAssertTrue(state.connected)
         XCTAssertTrue(state.canChange)
         fixture.statuses = [:]
@@ -753,6 +751,26 @@ final class ConnectionTests: XCTestCase {
         XCTAssertNil(state.publicFailure)
         await state.setConnected(false)
         XCTAssertNil(state.publicInfo)
+    }
+
+    func testInternetOptionWriteKeepsPublicLookupForSameConnection() async throws {
+        let server = DetailFixtureServer()
+        let detail = try await make(server)
+        let state = InternetState(detail: detail, profileID: profileID)
+        await state.load()
+
+        await server.holdNext("/internet-connections/public")
+        let lookup = Task { await state.loadPublic() }
+        await server.waitForHeldRequest()
+        var options = state.options
+        options.defaultRoute.toggle()
+        await state.updateOptions(options)
+        XCTAssertTrue(state.publicLoading)
+        XCTAssertEqual(state.options.defaultRoute, options.defaultRoute)
+
+        await server.release()
+        await lookup.value
+        XCTAssertEqual(state.publicInfo?.ip, "203.0.113.1")
     }
 
     func testProxyURLPreservesIPv6AndEscapesCredentials() throws {
@@ -834,6 +852,52 @@ final class ConnectionTests: XCTestCase {
         await state.load()
         XCTAssertEqual(state.settings?.underlay.proxyId, proxy.id)
         XCTAssertNil(state.failure)
+    }
+
+    func testWiFiProxyCheckIgnoresAnEarlierRequestForTheSameProxy() async throws {
+        let server = DetailFixtureServer()
+        let detail = try await make(server)
+        let connection = WiFiCallingState(detail: detail, profileID: profileID)
+        let proxy = WiFiProxyState(scope: connection.scope)
+        try await proxy.save(nil, .init(name: "Office", host: "proxy.example", port: 1080, username: "", password: ""))
+        let selectedID = proxy.selectedID
+
+        await server.holdNext("/wifi-calling/connectivity-checks")
+        proxy.requestCheck()
+        let firstCheck = try XCTUnwrap(proxy.check)
+        let original = Task { try await proxy.runCheck(firstCheck) }
+        await server.waitForHeldRequest()
+
+        proxy.select("")
+        proxy.select(selectedID)
+        proxy.requestCheck()
+        let replacement = try XCTUnwrap(proxy.check)
+        await server.release()
+        try await original.value
+
+        XCTAssertNil(proxy.result)
+        XCTAssertEqual(proxy.check?.id, replacement.id)
+        try await proxy.runCheck(replacement)
+        XCTAssertEqual(proxy.result?.tcp.ip, "203.0.113.4")
+    }
+
+    func testWiFiProxyCatalogCanRetryATransientFailure() async throws {
+        let server = DetailFixtureServer()
+        let detail = try await make(server)
+        let connection = WiFiCallingState(detail: detail, profileID: profileID)
+        let proxy = WiFiProxyState(scope: connection.scope)
+
+        await server.setStatus("/wifi-calling/proxies", 503)
+        await proxy.loadCatalog()
+        guard case .failed(let failure) = proxy.catalog else {
+            return XCTFail("Expected the proxy catalog to report a server error")
+        }
+        XCTAssertEqual(failure.status, 503)
+
+        await server.setStatus("/wifi-calling/proxies", 200)
+        await proxy.loadCatalog()
+        XCTAssertEqual(proxy.catalog, .loaded)
+        XCTAssertTrue(proxy.proxies.isEmpty)
     }
 
     func testUnavailableUplinkRemainsSelectedWithoutImplicitFallback() async throws {
@@ -988,7 +1052,7 @@ final class ConnectionTests: XCTestCase {
         await server.setConnectionFixture(fixture)
         await state.load()
         XCTAssertTrue(state.settings?.modemManaged == true)
-        XCTAssertEqual(state.settings?.statusKey, "connection.modemManaged")
+        XCTAssertEqual(state.settings?.status, .modemManaged)
     }
 
     func testVoLTEWriteRejectsOlderPollAndDuplicateSubmission() async throws {

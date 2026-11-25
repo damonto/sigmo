@@ -22,6 +22,7 @@
 "common.save" = "Save";
 "common.done" = "Done";
 "common.ok" = "OK";
+"common.retry" = "Retry";
 "common.refresh" = "Refresh";
 "common.working" = "Working…";
 "common.dismiss" = "Dismiss";
@@ -577,9 +578,7 @@
 "detail.networkStatus" = "Network status";
 "detail.networkNotRegistered" = "Not registered";
 "detail.mobileData" = "Mobile data";
-"detail.networkDetails" = "Network details";
 "detail.registeredNetwork" = "Registered network";
-"detail.registeredOperatorCode" = "Registered operator code";
 "detail.simOperator" = "SIM operator";
 "detail.trafficDownload" = "Download";
 "detail.trafficUpload" = "Upload";
@@ -741,7 +740,11 @@
 "connection.status" = "Status";
 "connection.duration" = "Connection Duration";
 "connection.apn" = "APN";
-"connection.options" = "Connection Options";
+"connection.apnAccessibility" = "Access Point Name";
+"connection.internetConnection" = "Internet Connection";
+"connection.internetDraftHint" = "Changes apply the next time you connect.";
+"connection.networkConfiguration" = "Network Configuration";
+"connection.callSettings" = "Calling Settings";
 "connection.details" = "Connection Details";
 "connection.optional" = "Optional";
 "connection.username" = "Username";
@@ -787,6 +790,8 @@
 "connection.emergencyAddress" = "Update Emergency Address";
 "connection.uplink" = "Network Connection";
 "connection.wifiProxy.title" = "SOCKS5 Proxy";
+"connection.wifiProxy.unsupported" = "This Sigmo server does not support SOCKS5 proxy configuration.";
+"connection.wifiProxy.results" = "Test Results";
 "connection.wifiProxy.add" = "Add Proxy";
 "connection.wifiProxy.edit" = "Edit Proxy";
 "connection.wifiProxy.selection" = "Select a proxy";
@@ -798,9 +803,7 @@
 "connection.wifiProxy.auth" = "Username and password";
 "connection.wifiProxy.username" = "Username";
 "connection.wifiProxy.password" = "Password";
-"connection.wifiProxy.save" = "Save Proxy";
 "connection.wifiProxy.cancel" = "Cancel";
-"connection.wifiProxy.retry" = "Retry";
 "connection.wifiProxy.server" = "SOCKS5 server";
 "connection.wifiProxy.tcp" = "TCP egress IP";
 "connection.wifiProxy.relay" = "UDP relay";
@@ -811,6 +814,7 @@
 "connection.wifiProxy.saveFailed" = "Could not save the SOCKS5 proxy.";
 "connection.wifiProxy.checkFailed" = "Could not test the SOCKS5 proxy.";
 "connection.wifiProxy.useProxy" = "Use SOCKS5 Proxy";
+"connection.wifiProxy.directUplinkHint" = "Turn off the SOCKS5 proxy to select a direct network connection.";
 "connection.wifiProxy.switchProxy" = "Switch Proxy";
 "connection.wifiProxy.namePlaceholder" = "Office proxy";
 "connection.wifiProxy.hostPlaceholder" = "proxy.example.com";
@@ -834,7 +838,7 @@
 "connection.uplinkUnavailable" = "Not connected or unavailable";
 "connection.uplinkHint" = "Use the Sigmo’s system network or an Internet connection from a device on the same Sigmo. Changing this setting reconnects Wi-Fi Calling.";
 "connection.enableVoLTE" = "Enable VoLTE";
-"connection.volteHint" = "Let Sigmo manage VoLTE for this device. Connection status is shown below.";
+"connection.volteHint" = "Let Sigmo manage VoLTE for this device.";
 "connection.modemManaged" = "Managed by Device";
 "connection.dataPath" = "Data Path";
 "connection.dataPathHint" = "Turn off VoLTE before changing its data path.";
@@ -889,7 +893,11 @@
 "messages.lineSuffix" = "Line ending %@";
 "messages.resultUnknown" = "The send result is not yet confirmed. Refresh to check before sending again.";
 "messages.inactiveLine" = "Enable this SIM line before replying. Its history remains available.";
-"messages.latest" = "Latest messages";
+"messages.inactiveLine.title" = "SIM line inactive";
+"messages.inactiveLine.detail" = "Enable this line to reply.";
+"messages.replyLocked" = "Unlock this SIM line to reply.";
+"messages.replyUnavailable.title" = "Reply unavailable";
+"messages.replyUnavailable.detail" = "Check the Sigmo connection to reply.";
 "messages.loading" = "Loading messages…";
 "messages.new" = "New Message";
 "messages.recipient" = "Phone number";
@@ -916,6 +924,7 @@
 "messages.search" = "Search numbers or messages";
 "messages.unknownSender" = "Unknown Sender";
 "messages.unread" = "Unread";
+"messages.unreadCount %lld" = "%lld unread";
 "push.allowed" = "Allowed";
 "push.denied" = "Not allowed";
 "push.enabled" = "Allow Notifications";

@@ -177,21 +177,25 @@ final class MessagesFlowTests: XCTestCase {
         assertConversationTitle(app, line: "Home / 主线路")
         capture(app, "Messages glass header and composer")
         input.tap(); input.typeText("Message from fixture UI")
-        XCTAssertTrue(app.buttons["message-send"].isHittable)
+        let send = app.buttons["message-send"]
+        XCTAssertTrue(send.isHittable)
+        XCTAssertGreaterThanOrEqual(send.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(send.frame.height, 44)
         XCTAssertLessThanOrEqual(input.frame.maxY, app.keyboards.firstMatch.frame.minY)
-        app.buttons["message-send"].tap()
+        send.tap()
         XCTAssertTrue(app.staticTexts["Message from fixture UI"].waitForExistence(timeout: 5))
         capture(app, "Messages reply")
-        if app.buttons["conversation-conversation-inactive"].isHittable {
-            app.buttons["conversation-conversation-inactive"].tap()
-        } else {
-            app.navigationBars.buttons.element(boundBy: 0).tap()
-            app.buttons["conversation-conversation-inactive"].tap()
-        }
-        XCTAssertTrue(app.staticTexts["History on your Travel line / 旅行线路历史"].waitForExistence(timeout: 5))
+
+        openInactiveConversation(in: app)
         assertConversationTitle(app, line: "Travel / 旅行")
-        XCTAssertFalse(app.buttons["message-send"].isEnabled)
+        assertInactiveLineStatus(in: app, title: "SIM line inactive", detail: "Enable this line to reply.")
         capture(app, "Inactive line history")
+
+        app.buttons["message-line-picker"].tap()
+        app.buttons["message-use-current-sim"].tap()
+        XCTAssertTrue(input.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["message-inactive-line"].firstMatch.exists)
+        assertConversationTitle(app, line: "Example Mobile")
     }
 
     func testMessageCopyMenuIsLocalized() {
@@ -235,6 +239,29 @@ final class MessagesFlowTests: XCTestCase {
         assertConversationTitle(app, line: "Home / 主线路")
         try app.performAccessibilityAudit(for: [.sufficientElementDescription])
         capture(app, "Messages Chinese dark accessibility size")
+
+        openInactiveConversation(in: app)
+        assertInactiveLineStatus(in: app, title: "SIM 线路未启用", detail: "启用此线路后即可回复。")
+        capture(app, "Inactive line Chinese dark accessibility size")
+    }
+
+    private func openInactiveConversation(in app: XCUIApplication) {
+        let inactive = app.buttons["conversation-conversation-inactive"]
+        if !inactive.isHittable {
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+        }
+        XCTAssertTrue(inactive.waitForExistence(timeout: 5), app.debugDescription)
+        inactive.tap()
+        XCTAssertTrue(app.staticTexts["History on your Travel line / 旅行线路历史"].waitForExistence(timeout: 5))
+    }
+
+    private func assertInactiveLineStatus(in app: XCUIApplication, title: String, detail: String) {
+        let status = app.descendants(matching: .any)["message-inactive-line"].firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(status.label.contains(title))
+        XCTAssertTrue(status.label.contains(detail))
+        XCTAssertFalse(app.descendants(matching: .any)["message-input"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["message-send"].exists)
     }
 
     private func assertConversationTitle(_ app: XCUIApplication, line expectedLine: String) {
@@ -251,8 +278,5 @@ final class MessagesFlowTests: XCTestCase {
         if !inline {
             XCTAssertTrue(app.navigationBars.firstMatch.frame.contains(line.frame))
         }
-        let send = app.buttons["message-send"]
-        XCTAssertGreaterThanOrEqual(send.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(send.frame.height, 44)
     }
 }

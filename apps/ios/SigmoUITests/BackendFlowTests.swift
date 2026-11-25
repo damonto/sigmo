@@ -319,7 +319,10 @@ final class BackendFlowTests: XCTestCase {
         search.buttons.firstMatch.tap()
         search.tap()
         search.typeText("missing\n")
-        XCTAssertTrue(app.descendants(matching: .any)["homeSearchEmpty"].firstMatch.waitForExistence(timeout: 5))
+        let emptyState = app.descendants(matching: .any)["homeSearchEmpty"].firstMatch
+        XCTAssertTrue(emptyState.waitForExistence(timeout: 5))
+        let list = app.collectionViews.firstMatch
+        XCTAssertEqual(emptyState.frame.midY, list.frame.midY, accuracy: list.frame.height * 0.15)
         search.buttons.firstMatch.tap()
         XCTAssertTrue(app.buttons["modem-\(studio)-device-1"].waitForExistence(timeout: 5))
     }
@@ -626,15 +629,16 @@ final class BackendFlowTests: XCTestCase {
         XCTAssertTrue(badge.waitForExistence(timeout: 10))
         XCTAssertEqual(badge.value as? String, "125")
         let homeMessagesTab = app.tabBars.buttons["Messages"]
-        // Native tab badges can append a localized unit to their accessibility value.
-        let homeBadge = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value MATCHES %@", #"125(\D.*)?"#), object: homeMessagesTab)
+        let unread = NSPredicate(format: "value == %@", "125 unread")
+        let homeBadge = XCTNSPredicateExpectation(predicate: unread, object: homeMessagesTab)
         XCTAssertEqual(XCTWaiter.wait(for: [homeBadge], timeout: 5), .completed, app.debugDescription)
         XCTAssertGreaterThan(badge.frame.minY, app.staticTexts["modemNumber-\(identity)"].frame.minY)
         XCTAssertGreaterThan(badge.frame.minX, app.staticTexts["modemMetadata-\(identity)"].frame.maxX)
         attachScreenshot(app)
         app.buttons["modem-\(identity)"].tap()
         let messagesTab = app.tabBars.buttons["Messages"]
-        XCTAssertTrue(messagesTab.waitForExistence(timeout: 5))
+        let modemBadge = XCTNSPredicateExpectation(predicate: unread, object: messagesTab)
+        XCTAssertEqual(XCTWaiter.wait(for: [modemBadge], timeout: 5), .completed, app.debugDescription)
         messagesTab.tap()
         let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: messagesTab)
         XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 5), .completed)

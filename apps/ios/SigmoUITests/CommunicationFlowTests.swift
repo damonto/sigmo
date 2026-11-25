@@ -76,10 +76,10 @@ final class CommunicationFlowTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Alice changed"].exists)
         app.tabBars.buttons["Messages"].tap()
         XCTAssertTrue(app.navigationBars["Messages"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["No messages yet."].waitForExistence(timeout: 5))
+        assertEmptyStateIsCentered("No messages yet.", in: app)
         app.tabBars.buttons["Calls"].tap()
         XCTAssertTrue(app.navigationBars["Calls"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["No calls yet."].waitForExistence(timeout: 5))
+        assertEmptyStateIsCentered("No calls yet.", in: app)
         app.tabBars.buttons["Devices"].tap()
         XCTAssertTrue(app.navigationBars["Sigmo"].waitForExistence(timeout: 5))
     }
@@ -100,7 +100,7 @@ final class CommunicationFlowTests: XCTestCase {
             }
             for (tab, empty) in pages {
                 tabs[tab].tap()
-                XCTAssertTrue(app.staticTexts[empty].waitForExistence(timeout: 5), app.debugDescription)
+                assertEmptyStateIsCentered(empty, in: app)
                 let name = app.staticTexts[backend]
                 let showsName = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: name)
                 showsName.isInverted = true
@@ -112,6 +112,15 @@ final class CommunicationFlowTests: XCTestCase {
         filter.tap()
         app.buttons["communication-backend-Locked"].tap()
         XCTAssertTrue(app.buttons["Log In"].waitForExistence(timeout: 5))
+    }
+
+    private func assertEmptyStateIsCentered(_ title: String, in app: XCUIApplication,
+                                           file: StaticString = #filePath, line: UInt = #line) {
+        let message = app.staticTexts[title]
+        XCTAssertTrue(message.waitForExistence(timeout: 5), app.debugDescription, file: file, line: line)
+        let list = app.collectionViews.firstMatch
+        // The title sits below the symbol within the centered placeholder.
+        XCTAssertEqual(message.frame.midY, list.frame.midY, accuracy: list.frame.height * 0.15, title, file: file, line: line)
     }
 
     func testCommunicationTabsKeepInlineTitlesAndReportPullToRefreshFailures() {

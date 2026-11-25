@@ -151,33 +151,43 @@ final class ConnectionFlowTests: XCTestCase {
     func testInternetDraftOptionsConnectionAndProxyDetails() {
         let app = launch()
         tap(app.buttons["profileInternet"], in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["internetTrafficHeading"].firstMatch.waitForExistence(timeout: 10))
         toggle("internetConnected", in: app)
         expectToggle("internetConnected", value: "0", in: app)
         XCTAssertFalse(app.descendants(matching: .any)["internetInterface"].exists)
-        tap(app.buttons["internetAPN"], in: app)
+        let apn = app.buttons["internetAPN"]
+        tap(apn, in: app)
+        XCTAssertTrue(app.navigationBars["APN"].exists)
         replace(app.textFields["internetAPNField"], with: "native.apn", in: app)
         replace(app.textFields["internetUsername"], with: "alice", in: app)
         back(app)
-        XCTAssertFalse(app.buttons["internetOptions"].exists)
-        XCTAssertFalse(app.buttons["internetDetails"].exists)
+        XCTAssertTrue(app.navigationBars["Internet"].exists)
+        scrollToTop(app)
         toggle("internetDefaultRoute", in: app)
         expectToggle("internetDefaultRoute", value: "1", in: app)
         toggle("internetAlwaysOn", in: app)
         expectToggle("internetAlwaysOn", value: "0", in: app)
         capture(app, name: "Internet main page connection options")
-        scrollToTop(app)
-        tap(app.buttons["internetAPN"], in: app)
+        tap(apn, in: app)
+        reveal(app.textFields["internetAPNField"], in: app)
         XCTAssertEqual(app.textFields["internetAPNField"].value as? String, "native.apn")
         XCTAssertEqual(app.textFields["internetUsername"].value as? String, "alice")
         back(app)
+        scrollToTop(app)
         toggle("internetConnected", in: app)
         expectToggle("internetConnected", value: "1", in: app)
-        tap(app.buttons["internetAPN"], in: app)
+        tap(apn, in: app)
+        XCTAssertTrue(app.textFields["internetAPNField"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.textFields["internetAPNField"].isEnabled)
         back(app)
         reveal(app.descendants(matching: .any)["internetInterface"].firstMatch, in: app)
         XCTAssertEqual(app.descendants(matching: .any)["internetInterface"].firstMatch.value as? String, "wwan0")
         capture(app, name: "Internet main page connection details")
+        reveal(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "IP Information")).firstMatch, in: app)
+        reveal(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Public Network")).firstMatch, in: app)
+        let publicIP = app.descendants(matching: .any)["internetPublicIP"].firstMatch
+        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "203.0.113.2"), object: publicIP)
+        XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 10), .completed)
         tap(app.buttons["copyHTTPProxy"], in: app)
         XCTAssertTrue(app.buttons["copySOCKSProxy"].exists)
         capture(app, name: "Internet proxy details")
@@ -237,7 +247,8 @@ final class ConnectionFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Connected"].waitForExistence(timeout: 10))
         tap(app.buttons["wifiCallingUplink"], in: app)
         tap(app.buttons["wifiUplink-system"], in: app)
-        back(app)
+        XCTAssertTrue(app.navigationBars["Wi-Fi Calling"].exists)
+        app.swipeDown()
         tap(app.buttons["wifiCallingEmergencyAddress"], in: app)
         XCTAssertTrue(web.waitForExistence(timeout: 10))
         tap(app.buttons["closeWiFiWebsheet"], in: app)
@@ -251,34 +262,59 @@ final class ConnectionFlowTests: XCTestCase {
         tap(app.buttons["copySOCKSProxy"], in: app)
         back(app)
         tap(app.buttons["profileWiFiCalling"], in: app)
-        tap(app.buttons["wifiCallingUplink"], in: app)
-        tap(app.buttons["Add Proxy"], in: app)
+        tap(app.buttons["wifiProxySettings"], in: app)
+        XCTAssertTrue(app.navigationBars["SOCKS5 Proxy"].exists)
+        tap(app.navigationBars["SOCKS5 Proxy"].buttons["Add Proxy"], in: app)
 
         let host = app.textFields["wifiProxyHost"]
         replace(host, with: "draft.test", in: app)
-        host.press(forDuration: 1)
-        let paste = app.descendants(matching: .any)["Paste"].firstMatch
-        XCTAssertTrue(paste.waitForExistence(timeout: 5))
-        paste.tap()
-        let filled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "2001:db8::1"), object: host)
-        XCTAssertEqual(XCTWaiter.wait(for: [filled], timeout: 5), .completed)
+        host.typeKey("v", modifierFlags: .command)
+        let hostFilled = NSPredicate(format: "value == %@", "2001:db8::1")
+        let shortcut = XCTNSPredicateExpectation(predicate: hostFilled, object: host)
+        if XCTWaiter.wait(for: [shortcut], timeout: 3) != .completed {
+            // The simulator can deliver clipboard actions through the text editing menu.
+            host.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).press(forDuration: 1)
+            let paste = app.descendants(matching: .any)["Paste"].firstMatch
+            XCTAssertTrue(paste.waitForExistence(timeout: 5), app.debugDescription)
+            paste.tap()
+            let filled = XCTNSPredicateExpectation(predicate: hostFilled, object: host)
+            XCTAssertEqual(XCTWaiter.wait(for: [filled], timeout: 5), .completed)
+        }
         XCTAssertEqual(app.textFields["wifiProxyName"].value as? String, "2001:db8::1")
         XCTAssertEqual(app.textFields["wifiProxyPort"].value as? String, "1080")
         XCTAssertEqual(app.textFields["wifiProxyUsername"].value as? String, "proxy")
-        XCTAssertTrue(app.buttons["Save Proxy"].isEnabled)
+        XCTAssertTrue(app.navigationBars["Add Proxy"].buttons["Save"].isEnabled)
 
         tap(app.buttons["Cancel"], in: app)
         expectToggle("wifiProxyEnabled", value: "0", in: app)
         XCTAssertFalse(app.buttons["Edit Proxy"].exists)
     }
 
+    func testWiFiCallingProxySettingsOpenWhenLineSettingsFail() {
+        let app = launch("detail-connection-read-error")
+        tap(app.buttons["profileWiFiCalling"], in: app)
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 10))
+        alert.buttons["OK"].tap()
+        tap(app.buttons["wifiProxySettings"], in: app)
+        XCTAssertTrue(app.navigationBars["SOCKS5 Proxy"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["SOCKS5 Proxy"].buttons["Add Proxy"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.switches["wifiProxyEnabled"].exists)
+    }
+
     func testWiFiCallingSOCKS5ProxyCanBeTestedBeforeApplying() {
         let app = launch("detail-connection-proxy-check")
         tap(app.buttons["profileWiFiCalling"], in: app)
-        tap(app.buttons["wifiCallingUplink"], in: app)
-        tap(app.buttons["Add Proxy"], in: app)
+        let uplink = app.buttons["wifiCallingUplink"]
+        reveal(uplink, in: app)
+        let originalUplink = uplink.value as? String
+        XCTAssertNotNil(originalUplink)
+        let proxySettings = app.buttons["wifiProxySettings"]
+        tap(proxySettings, in: app)
+        tap(app.navigationBars["SOCKS5 Proxy"].buttons["Add Proxy"], in: app)
 
         let name = app.textFields["wifiProxyName"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(name.placeholderValue, "Office proxy")
         tap(name, in: app)
         name.typeText("Office")
@@ -287,7 +323,7 @@ final class ConnectionFlowTests: XCTestCase {
         XCTAssertEqual(app.textFields["wifiProxyPort"].placeholderValue, "1080")
         tap(host, in: app)
         host.typeText("proxy.example")
-        tap(app.buttons["Save Proxy"], in: app)
+        tap(app.navigationBars["Add Proxy"].buttons["Save"], in: app)
 
         expectToggle("wifiProxyEnabled", value: "0", in: app)
         let check = app.buttons["Test Connection"]
@@ -306,11 +342,18 @@ final class ConnectionFlowTests: XCTestCase {
         app.swipeDown()
         toggle("wifiProxyEnabled", in: app)
         expectToggle("wifiProxyEnabled", value: "1", in: app)
+        back(app)
+        reveal(proxySettings, in: app)
+        XCTAssertEqual(proxySettings.value as? String, "On")
+        tap(proxySettings, in: app)
         toggle("wifiProxyEnabled", in: app)
         expectToggle("wifiProxyEnabled", value: "0", in: app)
-        let originalUplink = app.buttons["wifiUplink-modem-device-2"]
-        let restored = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true AND enabled == true"),
-                                                  object: originalUplink)
+        back(app)
+        for _ in 0..<4 where !uplink.isHittable { app.swipeDown() }
+        let restored = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@ AND enabled == true", originalUplink ?? ""),
+            object: uplink
+        )
         XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 10), .completed)
     }
 
@@ -320,27 +363,30 @@ final class ConnectionFlowTests: XCTestCase {
         expectToggle("volteEnabled", value: "1", in: app)
         toggle("volteEnabled", in: app)
         expectToggle("volteEnabled", value: "0", in: app)
-        tap(app.buttons["volteDataPath"], in: app)
-        tap(app.buttons["voltePath-legacy_bam_dmux"], in: app)
-        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: app.buttons["voltePath-legacy_bam_dmux"])
+        let path = app.buttons["volteDataPath"]
+        tap(path, in: app)
+        tap(app.buttons["Legacy BAM-DMUX"], in: app)
+        let selected = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@ OR label CONTAINS %@", "Legacy BAM-DMUX", "Legacy BAM-DMUX"),
+            object: path
+        )
         XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed)
+        XCTAssertTrue(app.navigationBars["VoLTE"].exists)
         capture(app, name: "VoLTE data path")
-        back(app)
+        app.swipeDown()
         toggle("volteEnabled", in: app)
         expectToggle("volteEnabled", value: "1", in: app)
-        tap(app.buttons["volteDataPath"], in: app)
-        XCTAssertFalse(app.buttons["voltePath-qmap"].isEnabled)
-        XCTAssertFalse(app.buttons["voltePath-qualcomm_410"].isEnabled)
+        reveal(path, in: app)
+        XCTAssertFalse(path.isEnabled)
     }
 
     func testMBIMShowsFixedDataPath() {
         let app = launch("detail-connection-mbim")
         tap(app.buttons["profileVoLTE"], in: app)
-        tap(app.buttons["volteDataPath"], in: app)
         let channel = app.descendants(matching: .any)["volteFixedDataPath"].firstMatch
-        XCTAssertTrue(channel.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(channel.label.contains("MBIM"), app.debugDescription)
-        XCTAssertFalse(app.buttons["voltePath-qmap"].exists)
+        reveal(channel, in: app)
+        XCTAssertTrue(channel.label.contains("MBIM") || channel.value as? String == "MBIM", app.debugDescription)
+        XCTAssertFalse(app.buttons["volteDataPath"].exists)
         capture(app, name: "Fixed MBIM data path")
     }
 
@@ -418,15 +464,18 @@ final class ConnectionFlowTests: XCTestCase {
         for (entry, control) in [("profileNetworkSelection", "networkAutomatic"), ("profileInternet", "internetConnected"),
                                  ("profileWiFiCalling", "wifiCallingEnabled"), ("profileVoLTE", "volteEnabled")] {
             tap(app.buttons[entry], in: app)
-            XCTAssertTrue(app.switches[control].waitForExistence(timeout: 10))
+            reveal(app.switches[control], in: app)
             XCTAssertGreaterThanOrEqual(app.switches[control].frame.height, 44)
             if entry == "profileWiFiCalling" {
                 toggle(control, in: app)
                 tap(app.alerts.buttons["confirmWiFiCalling"].firstMatch, in: app)
+                // At accessibility sizes, the newly visible progress can move the switch below the viewport.
+                reveal(app.switches[control], in: app)
                 expectToggle(control, value: "1", in: app)
             }
             if let label = progressNodes[entry] {
                 let node = app.descendants(matching: .any)["imsProgressNode-" + label].firstMatch
+                for _ in 0..<6 where !node.exists { app.swipeDown() }
                 XCTAssertTrue(node.waitForExistence(timeout: 5))
                 XCTAssertEqual(node.value as? String, "已完成")
                 if large { revealFullText(node, in: app) }
@@ -434,9 +483,9 @@ final class ConnectionFlowTests: XCTestCase {
             try audit(app, name: variant + " " + entry, types: types)
             if entry == "profileInternet" {
                 if large {
-                    for hint in ["internetDefaultRouteHint", "internetProxyHint", "internetAlwaysOnHint"] {
-                        revealFullText(app.staticTexts[hint], in: app)
-                        try audit(app, name: variant + " " + hint, types: types)
+                    for option in ["internetDefaultRoute", "internetProxyEnabled", "internetAlwaysOn"] {
+                        revealFullText(app.switches[option], in: app)
+                        try audit(app, name: variant + " " + option, types: types)
                     }
                 } else {
                     reveal(app.switches["internetAlwaysOn"], in: app)

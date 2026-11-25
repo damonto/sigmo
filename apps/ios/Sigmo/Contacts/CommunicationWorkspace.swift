@@ -108,26 +108,40 @@ struct CommunicationWorkspace: View {
         List {
             if session.canAccessDevices {
                 rows
-            } else {
-                Group {
-                    if session.isRefreshing && session.failure == nil && !isRefreshing {
-                        ProgressView("communication.loading").frame(maxWidth: .infinity)
-                    } else {
-                        emptyState
-                    }
-                }
-                .listRowSeparator(.hidden)
+            } else if !centersEmptyState {
+                emptyContent.listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)
         .listSectionIndexVisibility(session.canAccessDevices && section == .contacts && !state.isEmpty ? .visible : .hidden)
         .contentMargins(.top, 0, for: .scrollContent)
+        .overlay {
+            if centersEmptyState {
+                emptyContent.allowsHitTesting(false)
+            }
+        }
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await refresh() }
     }
 
-    private var emptyState: some View {
-        ContentUnavailableView(section.emptyTitle, systemImage: section.icon)
+    private var centersEmptyState: Bool {
+        guard modemID == nil else { return false }
+        if !session.canAccessDevices { return true }
+        guard state.isEmpty else { return false }
+        if section == .contacts { return true }
+        return state.cursor.isEmpty && !state.lines.contains(where: \.hasAssignableHistory)
+    }
+
+    @ViewBuilder private var emptyContent: some View {
+        let accessible = session.canAccessDevices
+        let loading = accessible ? state.loading : session.isRefreshing && session.failure == nil
+        if loading && !isRefreshing {
+            ProgressView("communication.loading").frame(maxWidth: .infinity)
+        } else if accessible && !state.search.isEmpty && state.failure == nil {
+            ContentUnavailableView.search(text: state.search)
+        } else {
+            ContentUnavailableView(section.emptyTitle, systemImage: section.icon)
+        }
     }
 
     @ViewBuilder private var rows: some View {
@@ -195,17 +209,8 @@ struct CommunicationWorkspace: View {
                     }
             }
         }
-        if state.isEmpty {
-            Group {
-                if state.loading && !isRefreshing {
-                    ProgressView("communication.loading").frame(maxWidth: .infinity)
-                } else if !state.search.isEmpty && state.failure == nil {
-                    ContentUnavailableView.search(text: state.search)
-                } else {
-                    emptyState
-                }
-            }
-            .listRowSeparator(.hidden)
+        if state.isEmpty && !centersEmptyState {
+            emptyContent.listRowSeparator(.hidden)
         }
         if !state.cursor.isEmpty {
             Button("communication.more") { Task { await state.load(more: true) } }

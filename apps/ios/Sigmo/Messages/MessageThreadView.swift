@@ -8,7 +8,7 @@ struct MessageThreadView: View {
     @Environment(\.nativePush) private var push
     @State private var confirmCall = false
     @State private var pendingSend: UUID?
-    @State private var visibleMessageID: Int64?
+    @State private var visibleReadPosition: ReadPosition?
 
     private var regionCode: String? {
         state.modem?.sim.identifier == state.conversation.profileId ? state.modem?.sim.regionCode : nil
@@ -26,8 +26,13 @@ struct MessageThreadView: View {
         return state.conversation.lineDescription()
     }
 
+    private struct ReadPosition: Equatable {
+        let conversationID: String
+        let messageID: Int64
+    }
+
     private struct ReadIdentity: Equatable {
-        let messageID: Int64?
+        let position: ReadPosition?
         let loading: Bool
     }
 
@@ -67,9 +72,10 @@ struct MessageThreadView: View {
             await state.send()
             if self.pendingSend == pendingSend { self.pendingSend = nil }
         }
-        .foregroundTask(id: ReadIdentity(messageID: visibleMessageID, loading: state.loading)) {
-            guard !state.loading, let id = visibleMessageID else { return }
-            await state.markRead(through: id)
+        .foregroundTask(id: ReadIdentity(position: visibleReadPosition, loading: state.loading)) {
+            guard !state.loading, let position = visibleReadPosition,
+                  position.conversationID == state.conversation.id else { return }
+            await state.markRead(through: position.messageID)
         }
         .onAppear { push?.visibleConversation = identity }
         .onChange(of: identity) { _, value in push?.visibleConversation = value }
@@ -91,23 +97,55 @@ struct MessageThreadView: View {
     }
 
     private var content: some View {
-        VStack(spacing: 0) {
-            timeline
-        }
+        timeline
         .background(Color(uiColor: .systemBackground))
         .safeAreaBar(edge: .bottom, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                if !state.canSend {
-                    Text("messages.inactiveLine")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 16)
-                }
-                MessageComposer(text: $state.draft, sending: state.sending, enabled: state.canSend) {
+            switch state.replyAvailability {
+            case .available:
+                MessageComposer(text: $state.draft, sending: state.sending, enabled: true) {
                     pendingSend = UUID()
                 }
+            case .inactive:
+                replyStatus("messages.inactiveLine.title", detail: "messages.inactiveLine.detail",
+                            icon: "lock.fill", identifier: "message-inactive-line")
+            case .locked:
+                replyStatus("detail.simLocked", detail: "messages.replyLocked",
+                            icon: "lock.fill", identifier: "message-locked-line")
+            case .unavailable:
+                replyStatus("messages.replyUnavailable.title", detail: "messages.replyUnavailable.detail",
+                            icon: "exclamationmark.circle", identifier: "message-reply-unavailable")
             }
         }
+    }
+
+    private func replyStatus(_ title: LocalizedStringKey, detail: LocalizedStringKey, icon: String,
+                             identifier: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(10)
+                .background(.quaternary, in: Circle())
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(identifier)
     }
 
     private var conversationTitle: some View {
@@ -140,11 +178,16 @@ struct MessageThreadView: View {
     }
 
     private var timeline: some View {
-        MessageTimeline(messages: state.messages.map(MessageTimelineItem.init), loading: state.loading && !state.loaded,
-                        older: state.cursor.isEmpty ? nil : { Task { await state.load(more: true) } },
-                        visibilityThreshold: 0.1, visible: { id, visible in
-                            if visible { visibleMessageID = max(visibleMessageID ?? 0, id) }
-                        }, refresh: { await state.load() })
+        let conversationID = state.conversation.id
+        return MessageTimeline(messages: state.messages.map(MessageTimelineItem.init), loading: state.loading && !state.loaded,
+                               older: state.cursor.isEmpty ? nil : { Task { await state.load(more: true) } },
+                               visibilityThreshold: 0.1, visible: { id, visible in
+                                   guard visible, state.conversation.id == conversationID else { return }
+                                   if let previous = visibleReadPosition, previous.conversationID == conversationID,
+                                      previous.messageID >= id { return }
+                                   visibleReadPosition = ReadPosition(conversationID: conversationID, messageID: id)
+                               }, refresh: { await state.load() })
+            .id(conversationID)
     }
 }
 

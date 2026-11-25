@@ -29,9 +29,10 @@ final class InternetState {
     var canEditAPN: Bool { scope.available && connection?.knownStatus == true && loadFailure == nil && !busy && !connected }
     var canEditOptions: Bool { canEditAPN || canChange }
     var options: InternetConnectionOptions { connected ? connection?.preferences.connectionOptions ?? draft.connectionOptions : draft.connectionOptions }
-    var statusKey: String {
-        guard let connection, connection.knownStatus else { return "common.unknown" }
-        return connection.connected ? "common.connected" : "common.disconnected"
+    var status: ConnectionStatus {
+        guard let connection else { return loadFailure == nil ? .loading : .unknown }
+        guard connection.knownStatus else { return .unknown }
+        return connection.connected ? .connected : .disconnected
     }
 
     func load(reconciling: Bool = false, acceptPreferences: Bool = false, refreshModem: Bool = true) async {
@@ -88,7 +89,8 @@ final class InternetState {
     }
 
     func loadPublic() async {
-        guard scope.available, !Task.isCancelled, !publicLoading, let key = connection?.connectionID else { return }
+        guard scope.available, !Task.isCancelled, !publicLoading, let key = connection?.connectionID,
+              key != publicConnectionID else { return }
         publicRevision += 1
         let revision = publicRevision
         publicLoading = true
@@ -103,7 +105,6 @@ final class InternetState {
         } catch {
             guard revision == publicRevision, scope.available, !Task.isCancelled, connection?.connectionID == key else { return }
             publicFailure = .wrapping(error)
-            failure = publicFailure
         }
     }
 
@@ -136,8 +137,6 @@ final class InternetState {
     private func change(acceptPreferences: Bool = false,
                         _ operation: @escaping @Sendable (BackendAPI, String?) async throws -> Void) async {
         readRevision += 1
-        publicRevision += 1
-        publicLoading = false
         loading = false
         updating = true
         failure = nil

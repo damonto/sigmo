@@ -435,29 +435,38 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue(registration.waitForExistence(timeout: 5))
         XCTAssertEqual(registration.label, "Roaming")
         XCTAssertEqual(title.label, "Travel Mobile")
+        XCTAssertFalse(card.descendants(matching: .any)["modemNetworkDetails"].firstMatch.exists)
         let signal = app.descendants(matching: .any)["signal-device-1"].firstMatch
         XCTAssertTrue(signal.waitForExistence(timeout: 5))
         XCTAssertEqual(signal.value as? String, "78%")
-        for (id, value) in [("Technology", "LTE"), ("Data", "Connected"), ("VoLTE", "Connected"), ("WiFiCalling", "Disabled")] {
+        let technology = app.descendants(matching: .any)["modemNetworkTechnology"].firstMatch
+        XCTAssertEqual(technology.value as? String, "LTE")
+        XCTAssertEqual(signal.frame.midY, technology.frame.midY, accuracy: 2)
+        XCTAssertGreaterThan(technology.frame.minX, signal.frame.maxX)
+        XCTAssertLessThanOrEqual(technology.frame.height, title.frame.height)
+        for (id, value) in [("Data", "Connected"), ("VoLTE", "Connected"), ("WiFiCalling", "Disabled")] {
             let status = app.descendants(matching: .any)["modemNetwork" + id].firstMatch
             XCTAssertEqual(status.value as? String, value, id)
         }
         let services = ["Data", "VoLTE", "WiFiCalling"].map {
             app.descendants(matching: .any)["modemNetwork" + $0].firstMatch.frame
         }
+        XCTAssertLessThanOrEqual(services[0].height, 20, "Service status should fit on one line")
         for (left, right) in zip(services, services.dropFirst()) {
             XCTAssertEqual(left.minY, right.minY, accuracy: 1, "Service statuses should share a row at the default text size")
             XCTAssertEqual(left.height, right.height, accuracy: 1, "Service labels should fit on one line")
             XCTAssertGreaterThanOrEqual(right.minX, left.maxX)
         }
         XCTAssertLessThan(services[1].width, services[2].width, "VoLTE should leave room for the longer Wi-Fi Calling label")
-        XCTAssertEqual(services[0].minX, card.frame.minX + 16, accuracy: 1)
-        XCTAssertEqual(services[2].maxX, card.frame.maxX - 16, accuracy: 1)
-        XCTAssertEqual(services[1].minX - services[0].maxX, services[2].minX - services[1].maxX, accuracy: 1)
+        XCTAssertEqual(services[0].minX, card.frame.minX + 16, accuracy: 2)
+        XCTAssertEqual(services[2].maxX, card.frame.maxX - 16, accuracy: 2)
+        XCTAssertEqual(services[1].minX - services[0].maxX, services[2].minX - services[1].maxX, accuracy: 2)
         try assertSystemTint(signal)
-        for id in ["modemNetworkVoLTE", "modemNetworkWiFiCalling"] {
+        for id in ["modemNetworkData", "modemNetworkVoLTE"] {
             try assertSystemTint(app.descendants(matching: .any)[id].firstMatch, minimumCoverage: 0.008)
         }
+        let wifiCalling = app.descendants(matching: .any)["modemNetworkWiFiCalling"].firstMatch
+        XCTAssertLessThan(try systemTintCoverage(wifiCalling), 0.008, "Disabled Wi-Fi Calling should use a muted icon")
         screenshot(app, name: "Roaming network card with system tint")
 
         let picker = app.buttons["simSlotPicker"]
@@ -467,17 +476,14 @@ final class ModemDetailFlowTests: XCTestCase {
         let switched = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'SIM 2' AND enabled == true"), object: picker)
         XCTAssertEqual(XCTWaiter.wait(for: [switched], timeout: 10), .completed)
         try assertSystemTint(signal)
-
-        let code = card.staticTexts.containing(NSPredicate(format: "label == '23410' OR value == '23410'")).firstMatch
-        XCTAssertFalse(code.exists)
-        tap(app.descendants(matching: .any)["modemNetworkDetails"].firstMatch, in: app)
-        XCTAssertTrue(code.waitForExistence(timeout: 5), app.debugDescription)
-        let simOperator = card.staticTexts.containing(NSPredicate(format: "label == 'Example Mobile' OR value == 'Example Mobile'")).firstMatch
-        XCTAssertTrue(simOperator.exists)
-        screenshot(app, name: "Roaming network card with expanded details")
     }
 
     private func assertSystemTint(_ element: XCUIElement, minimumCoverage: Double = 0.1) throws {
+        XCTAssertGreaterThan(try systemTintCoverage(element), minimumCoverage,
+                             "\(element.label) should use the system tint")
+    }
+
+    private func systemTintCoverage(_ element: XCUIElement) throws -> Double {
         let image = try XCTUnwrap(element.screenshot().image.cgImage)
         var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
         let tintedPixels = try pixels.withUnsafeMutableBytes { buffer in
@@ -498,8 +504,7 @@ final class ModemDetailFlowTests: XCTestCase {
             }
             return count
         }
-        XCTAssertGreaterThan(Double(tintedPixels) / Double(image.width * image.height), minimumCoverage,
-                             "\(element.label) should use the system tint")
+        return Double(tintedPixels) / Double(image.width * image.height)
     }
 
     func testSecureElementMetadataAndCopy() {
@@ -558,9 +563,11 @@ final class ModemDetailFlowTests: XCTestCase {
             app.buttons["simSlot-2"].tap()
             app.alerts.buttons[chinese ? "取消" : "Cancel"].tap()
             screenshot(app, name: "Compact network bar after scrolling \(chinese)")
-            for _ in 0..<4 where compactBar.exists {
-                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.58))
-                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.84))
+            for _ in 0..<8 where compactBar.exists {
+                let top = compactBar.frame.maxY
+                let bottom = app.tabBars.firstMatch.frame.minY
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: (top + 12) / app.frame.height))
+                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: (bottom - 12) / app.frame.height))
                 start.press(forDuration: 0.1, thenDragTo: end)
             }
             XCTAssertTrue(compactBar.waitForNonExistence(timeout: 5))

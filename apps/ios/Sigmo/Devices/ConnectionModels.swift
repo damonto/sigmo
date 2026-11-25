@@ -243,6 +243,37 @@ struct IMSConnectionProgress: Codable, Sendable, Equatable {
     var failed: Bool { status == "failed" }
 }
 
+enum ConnectionStatus: Equatable {
+    case loading, unknown, connected, disconnected, connecting, failed
+    case disabled, waitingForUplink, setupRequired, modemManaged
+
+    var localizationKey: String {
+        switch self {
+        case .loading: "connection.loading"
+        case .unknown: "common.unknown"
+        case .connected: "common.connected"
+        case .disconnected, .failed: "common.disconnected"
+        case .connecting: "modem.value.connecting"
+        case .disabled: "modem.value.disabled"
+        case .waitingForUplink: "connection.waitingForUplink"
+        case .setupRequired: "connection.setupRequired"
+        case .modemManaged: "connection.modemManaged"
+        }
+    }
+
+    static func ims(state: String, connected: Bool, progress: IMSConnectionProgress?) -> Self {
+        if progress?.pending == true { return .connecting }
+        if progress?.failed == true { return .failed }
+        if connected { return .connected }
+        return switch state {
+        case "connected": .connected
+        case "connecting": .connecting
+        case "idle", "disconnected": .disconnected
+        default: .unknown
+        }
+    }
+}
+
 struct DetailWiFiSettings: Codable, Sendable, Equatable {
     var enabled: Bool
     var underlay: WiFiUnderlay
@@ -254,19 +285,11 @@ struct DetailWiFiSettings: Codable, Sendable, Equatable {
     var websheet: CarrierWebsheet? = nil
     var progress: IMSConnectionProgress? = nil
 
-    var statusKey: String {
-        if !enabled { return "modem.value.disabled" }
-        if state == "waiting_for_uplink" { return "connection.waitingForUplink" }
-        if state == "websheet_required" { return "connection.setupRequired" }
-        if progress?.pending == true { return "modem.value.connecting" }
-        if progress?.failed == true { return "common.disconnected" }
-        if connected { return "common.connected" }
-        switch state {
-        case "connected": return "common.connected"
-        case "connecting": return "modem.value.connecting"
-        case "idle", "disconnected": return "common.disconnected"
-        default: return "common.unknown"
-        }
+    var status: ConnectionStatus {
+        if !enabled { return .disabled }
+        if state == "waiting_for_uplink" { return .waitingForUplink }
+        if state == "websheet_required" { return .setupRequired }
+        return .ims(state: state, connected: connected, progress: progress)
     }
 }
 
@@ -301,18 +324,10 @@ struct VoLTESettings: Codable, Sendable, Equatable {
 
     var modemManaged: Bool { !enabled && modemRegistered }
     var knownDataPath: Bool { dataPath == "mbim" || VoLTEDataPath(rawValue: dataPath) != nil }
-    var statusKey: String {
-        if modemManaged { return "connection.modemManaged" }
-        if !enabled { return "modem.value.disabled" }
-        if progress?.pending == true { return "modem.value.connecting" }
-        if progress?.failed == true { return "common.disconnected" }
-        if connected { return "common.connected" }
-        switch state {
-        case "connected": return "common.connected"
-        case "connecting": return "modem.value.connecting"
-        case "idle", "disconnected": return "common.disconnected"
-        default: return "common.unknown"
-        }
+    var status: ConnectionStatus {
+        if modemManaged { return .modemManaged }
+        if !enabled { return .disabled }
+        return .ims(state: state, connected: connected, progress: progress)
     }
 }
 

@@ -145,7 +145,8 @@ private struct ModemDetailScreen: View {
     }
 
     private var tabs: some View {
-        TabView(selection: $tab) {
+        let unreadCount = session.unreadCounts[state.modemID] ?? 0
+        return TabView(selection: $tab) {
             Tab("detail.tab.overview", systemImage: "simcard", value: DetailTab.overview) {
                 tabContent(.overview) { overview }
             }
@@ -160,7 +161,8 @@ private struct ModemDetailScreen: View {
                         }
                 }
             }
-            .badge(session.unreadCounts[state.modemID] ?? 0)
+            .badge(unreadCount)
+            .accessibilityValue("messages.unreadCount \(unreadCount)", isEnabled: unreadCount > 0)
             Tab("detail.tab.calls", systemImage: "phone", value: DetailTab.calls) {
                 tabContent(.calls) {
                     CallsView(state: callHistory, selected: $callRecord, dialpad: $dialpad,
@@ -326,7 +328,8 @@ private struct ModemDetailScreen: View {
                                 .modifier(ModemOverviewCardRow())
                         }
                         if showsTraffic {
-                            InternetTrafficCard(state: internetTraffic, accent: .accentColor)
+                            InternetTrafficCard(traffic: internetTraffic, target: target, accent: .accentColor)
+                                .modifier(ModemOverviewCardSurface())
                                 .modifier(ModemOverviewCardRow())
                         }
                         if state.esim {

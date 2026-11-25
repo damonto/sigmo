@@ -1,43 +1,43 @@
 import SwiftUI
 
 struct InternetTrafficCard: View {
-    let state: InternetTrafficState
+    let traffic: InternetTrafficState
+    let target: ModemSIMTarget?
     let accent: Color
+    var status: ConnectionStatus = .connected
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
 
     var body: some View {
-        let history = state.history
+        let history = target != nil && traffic.connectedTarget == target ? traffic.history : InternetTrafficHistory()
         VStack(alignment: .leading, spacing: 10) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    title
-                    Spacer(minLength: 0)
-                    connected
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    title
-                    connected
-                }
+            ConnectionCardHeader(status: status, statusIdentifier: "internetTrafficStatus") {
+                title
             }
-            let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
-            layout {
-                rate("detail.trafficDownload", icon: "arrow.down", bitsPerSecond: history.rates?.download)
-                    .accessibilityIdentifier("internetTrafficDownload")
-                rate("detail.trafficUpload", icon: "arrow.up", bitsPerSecond: history.rates?.upload)
-                    .accessibilityIdentifier("internetTrafficUpload")
-            }
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    usage(history.usedBytes)
-                    Spacer(minLength: 0)
-                    window(history.rates)
+            if status != .loading {
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                    : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+                layout {
+                    rate("detail.trafficDownload", icon: "arrow.down", bitsPerSecond: history.rates?.download)
+                        .accessibilityIdentifier("internetTrafficDownload")
+                    rate("detail.trafficUpload", icon: "arrow.up", bitsPerSecond: history.rates?.upload)
+                        .accessibilityIdentifier("internetTrafficUpload")
                 }
-                VStack(alignment: .leading, spacing: 4) {
+                if let rates = history.rates {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            usage(history.usedBytes)
+                            Spacer(minLength: 0)
+                            window(rates)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            usage(history.usedBytes)
+                            window(rates)
+                        }
+                    }
+                } else {
                     usage(history.usedBytes)
-                    window(history.rates)
                 }
             }
         }
@@ -45,16 +45,17 @@ struct InternetTrafficCard: View {
         .padding(.vertical, 13)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            Color.clear
-                .overlay(alignment: .bottom) {
-                    chart(history.points)
-                        .frame(height: 58)
-                }
-                .clipShape(ModemOverviewCardSurface.shape)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+            if history.points.count > 1 {
+                Color.clear
+                    .overlay(alignment: .bottom) {
+                        chart(history.points)
+                            .frame(height: 58)
+                    }
+                    .clipShape(ModemOverviewCardSurface.shape)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
         }
-        .modifier(ModemOverviewCardSurface())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("internetTrafficCard")
     }
@@ -72,27 +73,13 @@ struct InternetTrafficCard: View {
         .accessibilityIdentifier("internetTrafficHeading")
     }
 
-    private var connected: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "circle.fill")
-                .imageScale(.small)
-                .foregroundStyle(.green)
-                .accessibilityHidden(true)
-            Text("common.connected")
-        }
-        .font(.caption.weight(.semibold))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(.green.opacity(0.12), in: Capsule())
-    }
-
     private func rate(_ label: LocalizedStringKey, icon: String, bitsPerSecond: Double?) -> some View {
         let value = bitsPerSecond.map { formatRate($0) }
         return VStack(alignment: .leading, spacing: 2) {
-            Label {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .foregroundStyle(accent)
                 Text(label)
-            } icon: {
-                Image(systemName: icon).foregroundStyle(accent)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -133,8 +120,8 @@ struct InternetTrafficCard: View {
         .accessibilityIdentifier("internetTrafficUsage")
     }
 
-    private func window(_ rates: InternetTrafficHistory.Rates?) -> some View {
-        Text(rates?.total == 0 ? "detail.trafficIdle" : "detail.trafficWindow")
+    private func window(_ rates: InternetTrafficHistory.Rates) -> some View {
+        Text(rates.total == 0 ? "detail.trafficIdle" : "detail.trafficWindow")
             .font(.caption)
             .foregroundStyle(.secondary)
     }

@@ -6,9 +6,8 @@ struct ModemNetworkCard<SlotPicker: View>: View {
     let accent: Color
     @ViewBuilder let slotPicker: () -> SlotPicker
 
-    @ScaledMetric(relativeTo: .largeTitle) private var signalSize = 34.0
-    @ScaledMetric(relativeTo: .title2) private var symbolSize = 24.0
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -23,15 +22,14 @@ struct ModemNetworkCard<SlotPicker: View>: View {
                     registrationBadge
                 }
             }
-            carrierRow
-            radioMetrics
+            VStack(alignment: .leading, spacing: 5) {
+                carrierRow
+                radioMetrics
+            }
             services
-            Divider()
-            networkDetails
         }
         .padding(.horizontal, 16)
-        .padding(.top, 13)
-        .padding(.bottom, 10)
+        .padding(.vertical, 13)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(ModemOverviewCardSurface())
     }
@@ -52,7 +50,7 @@ struct ModemNetworkCard<SlotPicker: View>: View {
             ? "detail.simOperator" : "detail.registeredNetwork"
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-            : AnyLayout(HStackLayout(alignment: .bottom, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
         return layout {
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
@@ -103,68 +101,52 @@ struct ModemNetworkCard<SlotPicker: View>: View {
 
     private var radioMetrics: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(spacing: 8) {
                 signal
-                Divider()
+                Text(verbatim: "·")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 technology
             }
-            .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: 8) {
+            .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 4) {
                 signal
-                Divider()
                 technology
             }
         }
-        .padding(12)
-        .background(accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 14))
+        .font(.subheadline.weight(.semibold))
     }
 
     private var signal: some View {
         let signal = modem.cellularSignalFraction
         let value = signal.map { Text($0, format: .percent) }
-        return VStack(alignment: .leading, spacing: 2) {
-            Text("modem.signal")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            HStack(spacing: 8) {
-                Group {
-                    if modem.airplaneMode {
-                        Image(systemName: "airplane")
-                            .accessibilityLabel(Text("modem.airplane"))
-                    } else {
-                        Image(systemName: "cellularbars", variableValue: signal ?? 0)
-                            .symbolRenderingMode(.hierarchical)
-                            .accessibilityLabel(Text("modem.signal"))
-                            .accessibilityValue(value ?? Text("common.unknown"))
-                            .accessibilityIdentifier("signal-\(modem.id)")
-                    }
+        return HStack(spacing: 6) {
+            Group {
+                if modem.airplaneMode {
+                    Image(systemName: "airplane")
+                        .accessibilityLabel(Text("modem.airplane"))
+                } else {
+                    Image(systemName: "cellularbars", variableValue: signal ?? 0)
+                        .symbolRenderingMode(.hierarchical)
+                        .accessibilityLabel(Text("modem.signal"))
+                        .accessibilityValue(value ?? Text("common.unknown"))
+                        .accessibilityIdentifier("signal-\(modem.id)")
                 }
-                .font(.system(size: symbolSize, weight: .medium))
-                .foregroundStyle(accent)
-                (value ?? Text(verbatim: "—"))
-                    .font(.system(size: signalSize, weight: .semibold))
-                    .monospacedDigit()
-                    .accessibilityHidden(true)
             }
+            .imageScale(.large)
+            .foregroundStyle(accent)
+            (value ?? Text(verbatim: "—"))
+                .monospacedDigit()
+                .accessibilityHidden(true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var technology: some View {
         let value = modem.cellularTechnology.map(modemValue)
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("modem.technology")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(verbatim: value ?? "—")
-                .font(.title2.weight(.semibold))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("modem.technology"))
-        .accessibilityValue(value.map { Text(verbatim: $0) } ?? Text("common.unknown"))
-        .accessibilityIdentifier("modemNetworkTechnology")
+        return Text(verbatim: value ?? "—")
+            .accessibilityLabel(Text("modem.technology"))
+            .accessibilityValue(value.map { Text(verbatim: $0) } ?? Text("common.unknown"))
+            .accessibilityIdentifier("modemNetworkTechnology")
     }
 
     private var services: some View {
@@ -197,48 +179,22 @@ struct ModemNetworkCard<SlotPicker: View>: View {
     }
 
     private func service(_ title: LocalizedStringKey, icon: some View, status: ModemConnectionStatus) -> some View {
-        let connected = status == .connected
-        let value = Text(verbatim: status.displayName)
-        return VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
-                icon.foregroundStyle(accent)
+                icon.foregroundStyle(status == .connected ? accent : Color.secondary)
                 Text(title)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .font(.caption)
-            HStack(spacing: 4) {
-                Image(systemName: "circle.fill")
-                    .font(.caption2)
-                    .imageScale(.small)
-                    .foregroundStyle(connected ? Color.green : Color.secondary)
-                value
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(connected ? .primary : .secondary)
+            if differentiateWithoutColor {
+                Text(verbatim: status.displayName)
+                    .fontWeight(.semibold)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .font(.caption)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(title))
-        .accessibilityValue(value)
-    }
-
-    private var networkDetails: some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 8) {
-                DetailValue(title: "detail.simOperator", value: modem.simOperatorName)
-                DetailValue(title: "detail.registeredNetwork", value: modem.cellularOperator?.displayName)
-                DetailValue(title: "detail.registeredOperatorCode",
-                            value: modem.cellularOperator?.code.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-            .padding(.top, 4)
-        } label: {
-            Text("detail.networkDetails")
-                .fontWeight(.semibold)
-                .foregroundStyle(accent)
-        }
-        .font(.footnote)
-        .tint(accent)
-        .accessibilityIdentifier("modemNetworkDetails")
+        .accessibilityValue(Text(verbatim: status.displayName))
     }
 }

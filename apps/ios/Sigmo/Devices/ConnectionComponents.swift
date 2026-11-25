@@ -49,6 +49,7 @@ struct ConnectionAction<Value>: Identifiable {
 struct ConnectionLifecycle: ViewModifier {
     let scope: ProfileConnectionScope
     var refreshID = 0
+    var titleDisplayMode: NavigationBarItem.TitleDisplayMode = .inline
     let reload: @MainActor () async -> Void
     let cancelAction: @MainActor () -> Void
     var observe: (@MainActor () async -> Void)? = nil
@@ -67,7 +68,7 @@ struct ConnectionLifecycle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.defaultMinListRowHeight, 44)
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(titleDisplayMode)
             .disabled(!scope.available)
             .foregroundTask(id: Identity(available: scope.available, refresh: refreshID)) {
                 guard scope.available else { return }
@@ -131,15 +132,20 @@ enum ConnectionFormat {
     }
 }
 
-struct ConnectionDurationRow: View {
+struct ConnectionDuration<Content: View>: View {
     let seconds: Int64?
     let observedAt: Date
-    let running: Bool
+    @ViewBuilder var content: (String?) -> Content
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
-            let elapsed = running ? Int64(max(0, timeline.date.timeIntervalSince(observedAt))) : 0
-            DetailValue(title: "connection.duration", value: seconds.map { ConnectionFormat.duration($0 + elapsed) })
+        if let seconds {
+            TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                let elapsed = Int64(max(0, timeline.date.timeIntervalSince(observedAt)))
+                let (duration, overflow) = seconds.addingReportingOverflow(elapsed)
+                content(ConnectionFormat.duration(overflow ? .max : duration))
+            }
+        } else {
+            content(nil)
         }
     }
 }
@@ -169,22 +175,140 @@ struct ConnectionSecretValue: View {
     }
 }
 
-struct IMSConnectionStatusRow: View {
-    let access: IMSConnectionProgressNodes.Access
-    let statusKey: String
-    let identifier: String
-    let enabled: Bool
-    let connected: Bool
-    let progress: IMSConnectionProgress?
+struct ConnectionCardHeader<Title: View>: View {
+    let status: ConnectionStatus
+    let statusIdentifier: String
+    @ViewBuilder var title: () -> Title
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            DetailValue(title: "connection.status", value: detailText(statusKey))
-                .accessibilityIdentifier(identifier)
-            if enabled {
-                IMSConnectionProgressNodes(access: access, connected: connected, progress: progress)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                title()
+                Spacer(minLength: 0)
+                summary
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                title()
+                summary
             }
         }
+    }
+
+    @ViewBuilder private var summary: some View {
+        if status == .loading {
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityLabel(Text("connection.loading"))
+        } else {
+            ConnectionStatusBadge(status: status)
+                .accessibilityIdentifier(statusIdentifier)
+        }
+    }
+}
+
+private struct ConnectionStatusBadge: View {
+    let status: ConnectionStatus
+
+    private var tint: Color {
+        switch status {
+        case .connected, .modemManaged: .green
+        case .connecting, .waitingForUplink, .setupRequired: .orange
+        case .failed: .red
+        default: .secondary
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "circle.fill")
+                .imageScale(.small)
+                .foregroundStyle(tint)
+                .accessibilityHidden(true)
+            Text(LocalizedStringKey(status.localizationKey))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(tint.opacity(0.12), in: Capsule())
+    }
+}
+
+struct IMSConnectionStatusCard: View {
+    let access: IMSConnectionProgressNodes.Access
+    let status: ConnectionStatus
+    let enabled: Bool
+    let progress: IMSConnectionProgress?
+    let seconds: Int64?
+    let observedAt: Date
+    let detail: String?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ConnectionCardHeader(status: status,
+                                 statusIdentifier: access == .wifiCalling ? "wifiCallingStatus" : "volteStatus") {
+                heading
+            }
+            if enabled {
+                IMSConnectionProgressNodes(access: access, connected: status == .connected, progress: progress)
+                Divider()
+                    .accessibilityHidden(true)
+            }
+            if status != .loading {
+                let layout = dynamicTypeSize >= .xxxLarge
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                    : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+                layout {
+                    ConnectionDuration(seconds: status == .connected ? seconds : nil, observedAt: observedAt) { value in
+                        metric("connection.duration", value: value, icon: "clock")
+                            .monospacedDigit()
+                    }
+                    switch access {
+                    case .wifiCalling: metric("connection.uplink", value: detail, icon: "network")
+                    case .volte: metric("connection.dataPath", value: detail, icon: "arrow.triangle.branch")
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var heading: some View {
+        HStack(spacing: 6) {
+            IMSServiceIcon(service: access == .wifiCalling ? .wiFiCalling : .voLTE)
+                .foregroundStyle(.tint)
+                .accessibilityHidden(true)
+            Text("connection.status")
+                .accessibilityAddTraits(.isHeader)
+        }
+        .font(.headline)
+    }
+
+    private func metric(_ title: LocalizedStringKey, value: String?, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Image(systemName: icon)
+                        .foregroundStyle(.tint)
+                        .accessibilityHidden(true)
+                }
+                Text(title)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Text(value ?? "—")
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(value.map { Text(verbatim: $0) } ?? Text("common.unknown"))
     }
 }
 
@@ -219,6 +343,38 @@ struct IMSConnectionProgressNodes: View {
 
     var body: some View {
         let nodes = nodes
+        VStack(alignment: .leading, spacing: 5) {
+            let current = nodes.first { $0.status == .current || $0.status == .failed }
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    Text("connection.imsProgress.label")
+                    Spacer(minLength: 8)
+                    if let current { stepSummary(current) }
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("connection.imsProgress.label")
+                    if let current { stepSummary(current) }
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+            nodeList(nodes)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("connection.imsProgress.label"))
+    }
+
+    private func stepSummary(_ node: Node) -> some View {
+        HStack(spacing: 4) {
+            Text(verbatim: node.label)
+            Text(LocalizedStringKey("connection.imsProgress." + node.status.rawValue))
+        }
+        .fontWeight(.semibold)
+        .foregroundStyle(node.status == .failed ? Color.red : Color.accentColor)
+    }
+
+    private func nodeList(_ nodes: [Node]) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 6) {
                 ForEach(nodes.indices, id: \.self) { index in
@@ -243,8 +399,6 @@ struct IMSConnectionProgressNodes: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text("connection.imsProgress.label"))
     }
 
     private func nodeLabel(_ node: Node) -> some View {
