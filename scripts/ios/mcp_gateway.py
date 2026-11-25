@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["fastmcp==4.1.0"]
+# dependencies = ["fastmcp==4.2.5"]
 # ///
 """Pull source through SSH and expose Apple's Xcode MCP on the Mac's loopback address."""
 
@@ -54,7 +54,9 @@ class SourceSync:
         self.lock = asyncio.Lock()
         self.last_error = ""
         self.call_path = self.workspace / ".sigmo-call.json"
-        self.last_call = json.loads(self.call_path.read_text()) if self.call_path.exists() else None
+        self.last_call = (
+            json.loads(self.call_path.read_text()) if self.call_path.exists() else None
+        )
         if self.last_call and self.last_call["state"] == "running":
             # A gateway restart cannot establish whether Xcode finished an in-flight call.
             self.last_call["state"] = "unknown"
@@ -85,10 +87,14 @@ class SourceSync:
             or path.as_posix() != name
             or ".." in path.parts
             or not (
-                len(path.parts) >= 3 and path.parts[:2] == ("apps", "ios")
-                or len(path.parts) >= 3 and path.parts[:2] == ("scripts", "ios")
+                len(path.parts) >= 3
+                and path.parts[:2] == ("apps", "ios")
+                or len(path.parts) >= 3
+                and path.parts[:2] == ("scripts", "ios")
                 # Existing Mac state still names ios/ until its first sync after the move.
-                or allow_legacy and len(path.parts) >= 2 and path.parts[0] == "ios"
+                or allow_legacy
+                and len(path.parts) >= 2
+                and path.parts[0] == "ios"
             )
         ):
             raise ValueError(f"invalid source manifest path: {name}")
@@ -96,7 +102,9 @@ class SourceSync:
         for part in path.parts:
             target /= part
             if target.is_symlink():
-                raise ValueError(f"Mac source contains a symlink; resolve it before syncing: {name}")
+                raise ValueError(
+                    f"Mac source contains a symlink; resolve it before syncing: {name}"
+                )
         return target
 
     def check_local_edits(self, incoming):
@@ -351,19 +359,27 @@ async def main():
         await sync.run()
         await asyncio.to_thread(
             subprocess.run,
-            ["open", "-a", "Xcode", str(sync.workspace / "apps/ios/Sigmo.xcodeproj")], check=True
+            ["open", "-a", "Xcode", str(sync.workspace / "apps/ios/Sigmo.xcodeproj")],
+            check=True,
         )
         bridge = Client(
             StdioTransport(
-                "/usr/bin/xcrun", ["mcpbridge"], cwd=str(sync.workspace), keep_alive=False
+                "/usr/bin/xcrun",
+                ["mcpbridge"],
+                cwd=str(sync.workspace),
+                keep_alive=False,
             ),
             name="Sigmo remote development",
             init_timeout=180,
             timeout=1200,
         )
         proxy = make_gateway(sync, bridge, args.interval)
-        LOG.info("Xcode may request permission for this bridge. Allow it in the Mac UI.")
-        await proxy.run_async(transport="http", host=args.host, port=args.port, path="/mcp")
+        LOG.info(
+            "Xcode may request permission for this bridge. Allow it in the Mac UI."
+        )
+        await proxy.run_async(
+            transport="http", host=args.host, port=args.port, path="/mcp"
+        )
     except asyncio.CancelledError:
         LOG.info("Gateway stopped")
     finally:

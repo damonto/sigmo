@@ -11,7 +11,7 @@ Development host                          Mac
 
 ## Requirements
 
-- Linux: Git and Python 3.10 or later. MCP client calls and gateway tests also need FastMCP 4.1.0; `uv` can provide an isolated environment.
+- Linux: Git and Python 3.10 or later. MCP client calls and gateway tests also need FastMCP 4.2.5; `uv` can provide an isolated environment.
 - An SSH endpoint on the development host reachable from the Mac, with local and remote TCP forwarding permitted. Use a stable Tailscale name/address or DNS name. No incoming Mac connection is needed.
 - Mac: full Xcode with external-agent tools enabled, an iOS simulator runtime, XcodeGen 2.44.1 or later, Python 3.10 or later available as `python`, and `uv` on the terminal's PATH. Existing mise installations are supported.
 - A running macOS user session. Xcode may require approval for the agent and project folder from the Xcode MCP menu-bar control.
@@ -65,14 +65,14 @@ If the source service should only listen on loopback, omit `--host`, copy the re
 
 When migrating from the LAN or separate-terminal workflow, stop the old source, tunnel, and gateway processes and use these commands. `--mac-host` and the separate Python tunnel launcher have been removed. The Mac gateway and the development host's MCP forward remain bound to loopback.
 
-| Resource                                                      | Address or path                                              |
-| ------------------------------------------------------------- | ------------------------------------------------------------ |
-| Source manifest (development host)                            | `http://10.10.10.101:8766/manifest.json`                     |
-| Source manifest (Mac, through SSH)                            | `http://127.0.0.1:8766/manifest.json`                        |
-| Xcode MCP (development host's local forward)                  | `http://127.0.0.1:8765/mcp`                                  |
-| Gateway status (either machine, through the forward on Linux) | `http://127.0.0.1:8765/health`                               |
-| Linux snapshots                                               | `build/ios/snapshots/<revision>.tar.gz`                      |
-| Mac workspace                                                 | `~/Library/Developer/SigmoMCP/workspace/`                    |
+| Resource                                                      | Address or path                                                   |
+| ------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Source manifest (development host)                            | `http://10.10.10.101:8766/manifest.json`                          |
+| Source manifest (Mac, through SSH)                            | `http://127.0.0.1:8766/manifest.json`                             |
+| Xcode MCP (development host's local forward)                  | `http://127.0.0.1:8765/mcp`                                       |
+| Gateway status (either machine, through the forward on Linux) | `http://127.0.0.1:8765/health`                                    |
+| Linux snapshots                                               | `build/ios/snapshots/<revision>.tar.gz`                           |
+| Mac workspace                                                 | `~/Library/Developer/SigmoMCP/workspace/`                         |
 | Mac project                                                   | `~/Library/Developer/SigmoMCP/workspace/apps/ios/Sigmo.xcodeproj` |
 
 ## Codex project configuration
@@ -155,7 +155,7 @@ The default endpoint is `http://127.0.0.1:8765/mcp` on the development host. Ove
 ## Validation and current limits
 
 ```sh
-uv run --with fastmcp==4.1.0 \
+uv run --with fastmcp==4.2.5 \
   python -m unittest discover -s scripts/ios -p 'test_*.py' -v
 ```
 
