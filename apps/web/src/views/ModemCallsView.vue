@@ -368,6 +368,7 @@ watch(dialpadOpen, async (open) => {
       <div class="min-w-0 space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:gap-4 lg:space-y-0">
         <CommunicationSearchInput
           v-model="searchQuery"
+          class="lg:mx-1"
           :placeholder="t('modemDetail.calls.searchPlaceholder')"
           :clear-label="t('modemDetail.calls.clearSearch')"
         />

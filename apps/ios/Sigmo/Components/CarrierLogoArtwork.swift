@@ -9,22 +9,22 @@ struct CarrierLogoArtwork: Sendable {
         let icon: String?
         let catalogURL: URL?
 
-        @concurrent func load(samplesTint: Bool) async -> CarrierLogoArtwork? {
+        @concurrent func load(samplesTint: Bool, maximumSize: Int = 384) async -> CarrierLogoArtwork? {
             guard !Task.isCancelled else { return nil }
-            if let image = embeddedImage() {
+            if let image = embeddedImage(maximumSize: maximumSize) {
                 return CarrierLogoArtwork(image: image, samplesTint: samplesTint)
             }
             guard let catalogURL, let (data, response) = try? await URLSession.shared.data(from: catalogURL),
                   (response as? HTTPURLResponse)?.statusCode == 200, !Task.isCancelled,
-                  let image = CarrierLogoArtwork.thumbnail(from: data) else { return nil }
+                  let image = CarrierLogoArtwork.thumbnail(from: data, maximumSize: maximumSize) else { return nil }
             return CarrierLogoArtwork(image: image, samplesTint: samplesTint)
         }
 
-        private func embeddedImage() -> CGImage? {
+        private func embeddedImage(maximumSize: Int) -> CGImage? {
             guard let icon, icon.hasPrefix("data:image/"), let comma = icon.firstIndex(of: ","),
                   icon[..<comma].hasSuffix(";base64"),
                   let data = Data(base64Encoded: String(icon[icon.index(after: comma)...])) else { return nil }
-            return CarrierLogoArtwork.thumbnail(from: data)
+            return CarrierLogoArtwork.thumbnail(from: data, maximumSize: maximumSize)
         }
     }
 
@@ -39,7 +39,7 @@ struct CarrierLogoArtwork: Sendable {
         return URL(string: "https://sigmo.952007.xyz/logo/\(plmn)")
     }
 
-    private static func thumbnail(from data: Data) -> CGImage? {
+    private static func thumbnail(from data: Data, maximumSize: Int) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else {
             return nil
         }
@@ -47,7 +47,7 @@ struct CarrierLogoArtwork: Sendable {
         return CGImageSourceCreateThumbnailAtIndex(source, 0, [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: 384,
+            kCGImageSourceThumbnailMaxPixelSize: maximumSize,
             kCGImageSourceShouldCacheImmediately: true
         ] as CFDictionary)
     }

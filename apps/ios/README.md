@@ -22,6 +22,8 @@ Select the **Sigmo** scheme and an iPhone or iPad simulator, then run the app. A
 
 For physical-device builds, configure `DEVELOPMENT_TEAM` and `SIGMO_BUNDLE_ID` in `project.yml` for your Apple developer account. Push notifications also require the corresponding App ID capability and APNs configuration.
 
+For SMS notification artwork, enable Communication Notifications on the app's App ID. Register the `group.<SIGMO_BUNDLE_ID>.push` App Group and assign it to both the app and its notification service extension. The app caches Sigmo contact photos and SIM logos while it is in the foreground. The extension uses the contact photo, the receiving SIM's logo, or the bundled Sigmo logo, in that order, including while the app is closed.
+
 For Linux development with builds on a Mac, follow the [Xcode MCP workflow](../../scripts/ios/MCP.md). Edit source in the Linux repository; the synchronized Mac workspace is a build copy.
 
 ## Encryption export compliance

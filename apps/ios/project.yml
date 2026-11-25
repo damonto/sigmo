@@ -19,6 +19,7 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     SIGMO_BUNDLE_ID: com.damon.sigmo
     SIGMO_PUSH_GATEWAY_URL: https://sigmo.952007.xyz
+    SIGMO_PUSH_ARTWORK_GROUP: group.$(SIGMO_BUNDLE_ID).push
   configs:
     Debug:
       SIGMO_APNS_ENVIRONMENT: development
@@ -46,6 +47,9 @@ targets:
       path: .generated/Sigmo.entitlements
       properties:
         aps-environment: $(SIGMO_APNS_ENVIRONMENT)
+        com.apple.developer.usernotifications.communication: true
+        com.apple.security.application-groups:
+          - $(SIGMO_PUSH_ARTWORK_GROUP)
         com.apple.security.smartcard: true
         com.apple.developer.associated-domains:
           - webcredentials:sigmo.952007.xyz
@@ -64,6 +68,7 @@ targets:
         SigmoPushGatewayURL: $(SIGMO_PUSH_GATEWAY_URL)
         SigmoAPNsEnvironment: $(SIGMO_APNS_ENVIRONMENT)
         SigmoPushKeychainGroup: $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID).push
+        SigmoPushArtworkGroup: $(SIGMO_PUSH_ARTWORK_GROUP)
         LSApplicationCategoryType: public.app-category.utilities
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
@@ -80,6 +85,7 @@ targets:
           - audio
           - voip
         NSUserActivityTypes:
+          - INSendMessageIntent
           - INStartCallIntent
           - INStartAudioCallIntent
         NSLocalNetworkUsageDescription: Connect to your Sigmo connections and display their devices on your local network.
@@ -99,15 +105,21 @@ targets:
     platform: iOS
     sources:
       - SigmoNotificationService
+      - Sigmo/Components/PhoneNumberKey.swift
       - Sigmo/Notifications/PushPayload.swift
       - Sigmo/Notifications/PushPreview.swift
       - Sigmo/Notifications/PushKeychain.swift
+      - Sigmo/Notifications/PushArtworkCache.swift
+      - path: Sigmo/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+        buildPhase: resources
       - path: Sigmo/Resources
         includes:
           - "**/*.strings"
     entitlements:
       path: .generated/SigmoNotificationService.entitlements
       properties:
+        com.apple.security.application-groups:
+          - $(SIGMO_PUSH_ARTWORK_GROUP)
         keychain-access-groups:
           - $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID).NotificationService
           - $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID).push
@@ -118,6 +130,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         SigmoPushKeychainGroup: $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID).push
+        SigmoPushArtworkGroup: $(SIGMO_PUSH_ARTWORK_GROUP)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.usernotifications.service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService

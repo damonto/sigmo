@@ -54,7 +54,7 @@ struct HistoryAssignmentView: View {
                     .disabled(state.busy)
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .safeAreaInset(edge: .bottom, spacing: 0) { confirmation }
+            .safeAreaBar(edge: .bottom, spacing: 0) { confirmation }
             .navigationTitle("communication.assign")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -218,13 +218,13 @@ struct HistoryAssignmentView: View {
                 Text(state.selected.map { String(format: detailText("communication.assignmentConfirm"), lineTitle($0)) }
                      ?? detailText("communication.assignmentChooseLine"))
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.glassProminent)
+            .buttonBorderShape(.capsule)
             .controlSize(.large)
             .disabled(!state.canSubmit)
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 8)
-        .background(Color(uiColor: .systemGroupedBackground))
     }
 }

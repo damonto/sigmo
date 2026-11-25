@@ -114,13 +114,27 @@ struct ESIMProfilesSection: View {
     }
 
     private func profileButton(_ profile: ESIMProfile) -> some View {
+        let number = profile.number?.trimmingCharacters(in: .whitespacesAndNewlines)
         let pendingOperation = operation?.profile.id == profile.id ? operation?.kind : nil
         let hasSchedule = profile.reminder != nil || state.automationSummary(profileID: profile.iccid, seID: profile.seId) != nil
-        return Button {
-            selectProfile(profile.id)
-        } label: {
-            ESIMProfileRowLabel(profile: profile, operation: pendingOperation, hasSchedule: hasSchedule)
-                .contentShape(Rectangle())
+        let label = ESIMProfileRowLabel(profile: profile, operation: pendingOperation, hasSchedule: hasSchedule)
+            .contentShape(Rectangle())
+        let openProfile = { selectProfile(profile.id) }
+        return Group {
+            if let number, !number.isEmpty {
+                Menu {
+                    Button("detail.copy", systemImage: "document.on.document") {
+                        UIPasteboard.general.string = number
+                    }
+                } label: {
+                    label
+                } primaryAction: {
+                    openProfile()
+                }
+                .menuIndicator(.hidden)
+            } else {
+                Button(action: openProfile) { label }
+            }
         }
         .buttonStyle(.plain)
         .disabled(pendingOperation != nil || state.loading)

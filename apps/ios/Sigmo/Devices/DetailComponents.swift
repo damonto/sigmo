@@ -207,22 +207,3 @@ struct ReminderRow: View {
         return "\(date) · \(repetition)"
     }
 }
-
-struct ProfileSkeletonRows: View {
-    var body: some View {
-        ForEach(0..<3) { _ in
-            HStack(spacing: 12) {
-                ProfileAvatar(icon: nil, region: nil)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Example Mobile").font(.body)
-                    Text("8986000000000000000").font(.subheadline).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-            }
-            .detailSkeleton("detail.loadingProfiles")
-            .accessibilityIdentifier("profileLoading")
-        }
-    }
-}
-

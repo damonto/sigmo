@@ -119,7 +119,7 @@ struct HomeView: View {
     private var homeNavigation: some View {
         NavigationStack(path: $path) {
             HomeDevicesView(backendID: selectedBackendID, search: $search, add: { adding = true }, open: { selectedDevice = $0 })
-                .safeAreaInset(edge: .top, spacing: 0) {
+                .safeAreaBar(edge: .top, spacing: 0) {
                     if store.onlineSessions.count > 1 {
                         BackendFilterBar(selection: $selectedBackendID)
                             .padding(.horizontal, 16)

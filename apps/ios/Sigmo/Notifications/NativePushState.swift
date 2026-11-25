@@ -128,10 +128,38 @@ final class NativePushState {
     func run(store: BackendStore) async {
         guard !disabled else { return }
         self.store = store
+        async let artwork: Void = runArtworkSync(store: store)
         while store.foreground, !Task.isCancelled {
             await reconcile(store: store)
             do { try await Task.sleep(for: .seconds(30)) } catch { return }
         }
+        await artwork
+    }
+
+    private func runArtworkSync(store: BackendStore) async {
+        guard let cache = PushArtworkCache.appGroup else { return }
+        let sync = PushArtworkSync(cache: cache)
+        while store.foreground, !Task.isCancelled {
+            var seen: Set<String> = []
+            for configuration in store.settings.backends {
+                guard !Task.isCancelled else { return }
+                guard let session = store.sessions[configuration.id], let binding = artworkBinding(for: session),
+                      seen.insert(binding.backendID).inserted else { continue }
+                let revision = session.accessRevision
+                await sync.synchronize(session, backend: binding.backendID) {
+                    store.foreground && store.sessions[session.id] === session && session.accessRevision == revision &&
+                        self.artworkBinding(for: session)?.id == binding.id
+                }
+            }
+            do { try await Task.sleep(for: .seconds(30)) } catch { return }
+        }
+    }
+
+    private func artworkBinding(for session: BackendSession) -> PushBinding? {
+        guard session.canAccessDevices, let identity,
+              let connection = identity.connections.first(where: { $0.configurationID == session.id && $0.address == session.configuration.address }),
+              connection.backendID == session.communicationBackendID else { return nil }
+        return identity.bindings.first { $0.backendID == connection.backendID && $0.enabled && $0.sms }
     }
 
     func registered(token: Data) {
@@ -183,6 +211,9 @@ final class NativePushState {
         if let calls { next.bindings[index].calls = calls }
         do {
             try persist(next)
+            if !disabled, !next.bindings[index].enabled || !next.bindings[index].sms {
+                try? PushArtworkCache.appGroup?.remove(backend: binding.backendID)
+            }
             registered.remove(binding.id)
             configurationRevision += 1
             applyBadge()
@@ -222,9 +253,7 @@ final class NativePushState {
         // A new SIM can create another source conversation for the visible correspondent.
         guard let sender = content.sender, !sender.isEmpty else { return false }
         if sender.trimmingCharacters(in: .whitespacesAndNewlines) == thread.participant { return true }
-        let phoneCharacters = CharacterSet.decimalDigits.union(.whitespacesAndNewlines).union(CharacterSet(charactersIn: "+()- ."))
-        guard sender.unicodeScalars.allSatisfy(phoneCharacters.contains) else { return false }
-        return PhoneNumberDisplay.submission(sender, regionCode: nil) == thread.participant
+        return PhoneNumberKey.smsSender(sender) == thread.participant
     }
 
     nonisolated func receiveResponse(_ content: PushContent?, action: String, completion: @escaping @Sendable () -> Void) {
@@ -455,6 +484,7 @@ final class NativePushState {
         }
         try persist(next)
         for binding in removed {
+            if !disabled { try? PushArtworkCache.appGroup?.remove(backend: binding.backendID) }
             badges[binding.backendID] = nil
             registered.remove(binding.id)
             registrationStamps[binding.id] = nil

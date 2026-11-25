@@ -29,6 +29,9 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTFail("Cannot reach element: \(element)\n\(app.debugDescription)")
     }
     private func tapOverviewRow(_ element: XCUIElement, in app: XCUIApplication) {
+        overviewRowCoordinate(element, in: app)?.tap()
+    }
+    private func overviewRowCoordinate(_ element: XCUIElement, in app: XCUIApplication) -> XCUICoordinate? {
         let compactBar = app.descendants(matching: .any)["esimCompactNetworkBar"].firstMatch
         for _ in 0..<12 {
             let frame = app.frame
@@ -37,7 +40,7 @@ final class ModemDetailFlowTests: XCTestCase {
             let viewport = CGRect(x: frame.minX, y: top, width: frame.width, height: bottom - top)
             guard viewport.height >= 44 else {
                 XCTFail("No tappable list area below the network bar")
-                return
+                return nil
             }
             let rowFrame = element.waitForExistence(timeout: 1) ? element.frame : .null
             if !rowFrame.isEmpty {
@@ -45,11 +48,10 @@ final class ModemDetailFlowTests: XCTestCase {
                 if !visible.isNull, visible.height >= 44 {
                     let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: element)
                     XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
-                    app.coordinate(withNormalizedOffset: CGVector(
+                    return app.coordinate(withNormalizedOffset: CGVector(
                         dx: (visible.midX - frame.minX) / frame.width,
                         dy: (visible.midY - frame.minY) / frame.height
-                    )).tap()
-                    return
+                    ))
                 }
             }
             // Keep gestures below the compact bar when it overlays the list.
@@ -64,6 +66,7 @@ final class ModemDetailFlowTests: XCTestCase {
             start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.15)
         }
         XCTFail("Cannot reach overview row: \(element)\n\(app.debugDescription)")
+        return nil
     }
     private func screenshot(_ app: XCUIApplication, name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
@@ -145,13 +148,13 @@ final class ModemDetailFlowTests: XCTestCase {
             let app = launch(chinese: chinese, large: chinese)
             let active = app.buttons["profileActions-se-a:8986000000000000001"]
             let inactive = app.buttons["profileActions-se-a:8986000000000000002"]
-            XCTAssertTrue(active.waitForExistence(timeout: 5))
+            // Large Dynamic Type can leave both profiles offscreen.
+            _ = overviewRowCoordinate(active, in: app)
             XCTAssertGreaterThanOrEqual(active.frame.height, 68)
             XCTAssertTrue(app.staticTexts[chinese ? "2 个配置" : "2 profiles"].exists)
             XCTAssertTrue(active.label.contains("Primary"), active.label)
             XCTAssertTrue(active.label.contains("+86 138 0000 0000"), active.label)
             XCTAssertFalse(active.label.contains("8986000000000000001"), active.label)
-            // Large Dynamic Type can leave the second profile offscreen.
             let list = app.collectionViews.firstMatch
             for _ in 0..<8 where !inactive.exists {
                 XCTAssertTrue(list.exists, app.debugDescription)
@@ -164,6 +167,36 @@ final class ModemDetailFlowTests: XCTestCase {
             XCTAssertFalse(inactive.label.contains("8986000000000000002"), inactive.label)
             app.terminate()
         }
+    }
+
+    func testProfileNumberCopiesFromOverview() {
+        let app = launch()
+        let active = "se-a:8986000000000000001"
+        let copy = app.buttons["Copy"]
+
+        overviewRowCoordinate(app.buttons["profileActions-" + active], in: app)?.press(forDuration: 1)
+        XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
+        copy.tap()
+        XCTAssertTrue(app.buttons["modemInfo"].isHittable)
+
+        openActions(app, profile: active)
+        app.buttons["Label"].tap()
+        let input = app.textFields["detailInput"]
+        replace(input, value: "")
+        input.press(forDuration: 1)
+        let paste = app.descendants(matching: .any)["Paste"].firstMatch
+        XCTAssertTrue(paste.waitForExistence(timeout: 5))
+        paste.tap()
+        XCTAssertEqual(input.value as? String, "+8613800000000")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        let inactive = app.buttons["profileActions-se-a:8986000000000000002"]
+        let inactiveCoordinate = overviewRowCoordinate(inactive, in: app)
+        XCTAssertTrue(inactive.label.contains("No Number"), inactive.debugDescription)
+        inactiveCoordinate?.press(forDuration: 1)
+        XCTAssertFalse(copy.exists, app.debugDescription)
     }
 
     func testOverviewInfoAndNotifications() {

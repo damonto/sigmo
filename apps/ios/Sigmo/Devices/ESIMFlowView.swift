@@ -490,29 +490,13 @@ struct ESIMFlowView: View {
                         .padding(.vertical, 16).disabled(state.busy)
                 }
             }
-            ESIMSetupGroup {
-                if state.busy, state.profiles.isEmpty { ProfileSkeletonRows() }
-                if !state.busy, state.profiles.isEmpty, state.failure == nil {
-                    Text("detail.noTransferProfiles").foregroundStyle(.secondary).padding(.vertical, 16)
-                }
-                ForEach(state.profiles) { profile in
-                    if profile.id != state.profiles.first?.id { Divider().padding(.leading, 44) }
-                    Button { state.selectProfile(profile) } label: {
-                        HStack {
-                            ProfileAvatar(icon: profile.icon, region: profile.regionCode)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(profile.name)
-                                Text(profile.iccid).font(.caption.monospaced()).foregroundStyle(.secondary)
-                                if let reason = profile.unsupportedReason, !profile.supported { Text(reason).font(.caption).foregroundStyle(.secondary) }
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                            if state.selectedProfile?.id == profile.id { Image(systemName: "checkmark").foregroundStyle(.tint) }
-                        }.foregroundStyle(.primary).padding(.vertical, 16).contentShape(Rectangle())
-                    }
-                    .disabled(!profile.supported || state.busy)
-                    .accessibilityIdentifier("transferProfile-" + profile.id)
-                    .accessibilityAddTraits(state.selectedProfile?.id == profile.id ? .isSelected : [])
-                }
-            }
+            TransferProfilePicker(
+                profiles: state.profiles,
+                selectedID: state.selectedProfile?.id,
+                isLoading: state.busy,
+                showsEmptyState: state.failure == nil,
+                select: state.selectProfile
+            )
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Button { state.startTransfer() } label: {
@@ -547,6 +531,73 @@ struct ESIMFlowView: View {
         case "deleting": detailText("detail.stageDeleting")
         case "completing": detailText("detail.stageCompleting")
         default: state.stage.isEmpty ? detailText("detail.connecting") : state.stage
+        }
+    }
+}
+
+struct TransferProfilePicker: View {
+    let profiles: [TransferProfile]
+    let selectedID: String?
+    let isLoading: Bool
+    let showsEmptyState: Bool
+    let select: (TransferProfile) -> Void
+
+    var body: some View {
+        ESIMSetupGroup {
+            if profiles.isEmpty, isLoading {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(0..<3) { index in
+                        row(for: nil, showsDivider: index > 0)
+                    }
+                }
+                .detailSkeleton("detail.loadingProfiles")
+                .accessibilityIdentifier("profileLoading")
+            } else if profiles.isEmpty, showsEmptyState {
+                Text("detail.noTransferProfiles")
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 16)
+            } else {
+                ForEach(profiles) { profile in
+                    row(for: profile, showsDivider: profile.id != profiles.first?.id)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(for profile: TransferProfile?, showsDivider: Bool) -> some View {
+        let selected = profile.map { $0.id == selectedID } ?? false
+        let label = HStack {
+            ProfileAvatar(icon: profile?.icon, region: profile?.regionCode)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(profile?.name ?? "Example Mobile")
+                    .lineLimit(profile == nil ? 1 : nil)
+                Text(profile?.iccid ?? "8986000000000000000")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                if let profile, !profile.supported, let reason = profile.unsupportedReason {
+                    Text(reason).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if selected {
+                Image(systemName: "checkmark")
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+            }
+        }
+        .foregroundStyle(.primary)
+        .padding(.vertical, 16)
+        .contentShape(Rectangle())
+
+        if showsDivider { Divider().padding(.leading, 44) }
+        if let profile {
+            Button { select(profile) } label: { label }
+                .disabled(!profile.supported || isLoading)
+                .accessibilityIdentifier("transferProfile-" + profile.id)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+        } else {
+            label
         }
     }
 }

@@ -7,17 +7,9 @@ enum PhoneNumberDisplay {
     private static let utility = PhoneNumberUtility()
 
     static func submission(_ value: String, regionCode: String?) -> String {
-        var chars = ""
-        for character in value {
-            if character >= "0" && character <= "9" { chars.append(character) }
-            else if character == "+" && chars.isEmpty { chars.append(character) }
-        }
-        guard !chars.isEmpty, chars != "+" else { return "" }
-        if !chars.hasPrefix("+"), chars.count <= 6 { return chars }
-        let region = regionCode?.uppercased() ?? ""
-        let callingCode = utility.countryCode(for: region)
-        if chars.hasPrefix("+") { return chars }
-        guard let callingCode else { return chars }
+        let chars = PhoneNumberKey.compact(value)
+        guard !chars.hasPrefix("+"), chars.count > 6,
+              let region = regionCode?.uppercased(), let callingCode = utility.countryCode(for: region) else { return chars }
         if let parsed = try? utility.parse(chars, withRegion: region, ignoreType: true) {
             let international = utility.format(parsed, toType: .e164)
             return international == "+" + chars || parsed.countryCode != callingCode ? international : chars

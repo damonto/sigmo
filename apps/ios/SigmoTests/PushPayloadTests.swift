@@ -192,6 +192,7 @@ final class PushPayloadTests: XCTestCase {
         push.visibleThread = PushThread(backendID: "one", participant: "+14155552671", conversationIDs: ["sim-a", "sim-b"])
         XCTAssertTrue(push.receive(PushContent(kind: "sms", backendId: "one", backendName: "", conversationId: "sim-b"), tapped: false))
         XCTAssertTrue(push.receive(PushContent(kind: "sms", backendId: "one", backendName: "", conversationId: "sim-c", sender: "+14155552671"), tapped: false))
+        XCTAssertTrue(push.receive(PushContent(kind: "sms", backendId: "one", backendName: "", conversationId: "sim-c", sender: "(+1) 415 555 2671"), tapped: false))
         XCTAssertFalse(push.receive(PushContent(kind: "sms", backendId: "two", backendName: "", conversationId: "sim-b", sender: "+14155552671"), tapped: false))
         XCTAssertFalse(push.receive(PushContent(kind: "sms", backendId: "one", backendName: "", conversationId: "other", sender: "10086"), tapped: false))
         push.visibleThread = PushThread(backendID: "one", participant: "10086", conversationIDs: [])
