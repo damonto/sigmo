@@ -21,7 +21,6 @@ struct HomeView: View {
     @State private var selectedDevice: BackendDestination?
     @State private var selectedBackendID: UUID?
     @State private var search = ""
-    @State private var refreshFailure: BackendFailure?
     @State private var communicationDial: CommunicationDialRequest?
     @State private var callNavigationID: UUID?
     @State private var modemDial: ModemDialRequest?
@@ -118,7 +117,7 @@ struct HomeView: View {
     // preserves its search and connection filter while switching workspaces.
     private var homeNavigation: some View {
         NavigationStack(path: $path) {
-            HomeDevicesView(backendID: selectedBackendID, search: $search, add: { adding = true }, open: { selectedDevice = $0 })
+            HomeDevicesView(backendID: $selectedBackendID, search: $search, add: { adding = true }, open: { selectedDevice = $0 })
                 .safeAreaBar(edge: .top, spacing: 0) {
                     if store.onlineSessions.count > 1 {
                         BackendFilterBar(selection: $selectedBackendID)
@@ -127,13 +126,7 @@ struct HomeView: View {
                     }
                 }
                 .navigationTitle("Sigmo")
-                .navigationBarTitleDisplayMode(.large)
-                .refreshable {
-                    await store.refreshAll()
-                    guard !Task.isCancelled else { return }
-                    refreshFailure = store.orderedSessions(backendID: selectedBackendID).compactMap(\.failure).first
-                }
-                .detailErrorAlert($refreshFailure)
+                .navigationBarTitleDisplayMode(.inline)
                 .navigationDestination(for: BackendDestination.self) { destination in
                     destinationView(destination)
                 }

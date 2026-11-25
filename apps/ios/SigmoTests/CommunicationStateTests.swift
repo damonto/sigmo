@@ -82,9 +82,9 @@ final class CommunicationStateTests: XCTestCase {
             let state = CommunicationState(session: first, section: section)
             await state.load()
             XCTAssertFalse(state.isEmpty)
-            await state.delete("record-0")
+            let deletionFailure = await state.delete("record-0")
             XCTAssertTrue(state.isEmpty)
-            XCTAssertNil(state.deletionFailure)
+            XCTAssertNil(deletionFailure)
             let other = CommunicationState(session: second, section: section)
             await other.load()
             XCTAssertFalse(other.isEmpty)
@@ -102,9 +102,9 @@ final class CommunicationStateTests: XCTestCase {
             XCTAssertFalse(state.isEmpty)
 
             await server.setUnavailable(true)
-            await state.delete("record-0")
+            let deletionFailure = await state.delete("record-0")
             XCTAssertTrue(state.isEmpty)
-            XCTAssertNil(state.deletionFailure)
+            XCTAssertNil(deletionFailure)
             XCTAssertNotNil(state.failure)
         }
     }
@@ -236,6 +236,24 @@ final class CommunicationStateTests: XCTestCase {
             XCTAssertEqual(requests.count, 3)
             XCTAssertFalse(state.cursor.isEmpty)
         }
+    }
+
+    func testSupersededRefreshDoesNotReturnNewerLoadFailure() async throws {
+        let server = HistoryFixture(name: "First", days: [4])
+        let session = try await session("First", server: server)
+        let state = CommunicationState(session: session, section: .messages)
+        await server.holdNextHistoryRead()
+        let refresh = Task { await state.load(force: true) }
+        await server.waitForHistoryRead()
+
+        await server.setUnavailable(true)
+        let failure = await state.load()
+        await server.releaseHistoryRead()
+        let refreshFailure = await refresh.value
+
+        XCTAssertNotNil(failure)
+        XCTAssertNil(refreshFailure)
+        XCTAssertEqual(state.failure, failure)
     }
 
     func testBackgroundPausesAutomaticRefreshWithoutDiscardingPendingRead() async throws {

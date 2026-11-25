@@ -20,6 +20,8 @@ struct CommunicationWorkspace: View {
     @State private var deleting: String?
     @State private var selectedCall: CallRecord?
     @State private var selectedContactID: String?
+    @State private var isRefreshing = false
+    @State private var presentedFailure: BackendFailure?
 
     private var session: BackendSession { state.session }
     private var section: CommunicationSection { state.section }
@@ -34,16 +36,16 @@ struct CommunicationWorkspace: View {
 
     var body: some View {
         Group {
-            if session.canAccessDevices {
-                list
-            } else if needsLogin {
+            if needsLogin {
                 SettingsAccessView(session: session) { EmptyView() }
+                    .refreshable { await session.refresh(force: true) }
             } else {
-                unavailableList
+                list
             }
         }
         .navigationTitle(section.title)
-        .navigationBarTitleDisplayMode(modemID == nil ? .large : .inline)
+        // Keep the title fixed when pulling down on the list.
+        .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $state.search, placement: .navigationBarDrawer(displayMode: .always), prompt: dynamicTypeSize.isAccessibilitySize ? LocalizedStringKey("home.search") : section.searchPrompt)
         .searchToolbarBehavior(.minimize)
         .textInputAutocapitalization(.never)
@@ -67,16 +69,9 @@ struct CommunicationWorkspace: View {
             SystemContactImport { imported = $0 }
         }
         .communicationActions($action, session: session, sent: { Task { await state.load() } })
-        .detailErrorAlert($state.deletionFailure)
+        .detailErrorAlert($presentedFailure)
         .task(id: callbackDial?.id) { [request = callbackDial] in
             if let request { applyCallbackDial(request) }
-        }
-        .refreshable {
-            if session.canAccessDevices {
-                await state.load(force: true)
-            } else {
-                await session.refresh(force: true)
-            }
         }
         .foregroundTask {
             if !session.canAccessDevices && !needsLogin { await session.refresh(force: true) }
@@ -91,7 +86,11 @@ struct CommunicationWorkspace: View {
         }
         .alert("communication.delete", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { id in
             Button("communication.delete", role: .destructive) {
-                Task { await state.delete(id) }
+                Task {
+                    if let failure = await state.delete(id), !Task.isCancelled {
+                        presentedFailure = failure
+                    }
+                }
                 deleting = nil
             }
             Button("common.cancel", role: .cancel) { }
@@ -105,115 +104,129 @@ struct CommunicationWorkspace: View {
                         accessRevision: session.accessRevision, accessible: session.canAccessDevices)
     }
 
-    private var unavailableList: some View {
-        List {
-            Group {
-                if session.isRefreshing && session.failure == nil {
-                    ProgressView("communication.loading").frame(maxWidth: .infinity)
-                } else {
-                    emptyState
-                }
-            }
-            .listRowSeparator(.hidden)
-        }
-        .listStyle(.plain)
-        .contentMargins(.top, 0, for: .scrollContent)
-    }
-
-    private var emptyState: some View {
-        ContentUnavailableView(section.emptyTitle, systemImage: section.icon)
-    }
-
     private var list: some View {
         List {
-            if section != .contacts {
-                filters
-                    .padding(.bottom, 8)
-                    .frame(minHeight: minimumRowHeight, alignment: .top)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                    .listRowSeparator(.hidden)
-            }
-            if section != .contacts {
-                HistoryAssignmentSection(session: session, lines: state.lines) {
-                    await state.load(force: true)
-                }
-            }
-            switch section {
-            case .contacts:
-                ForEach(ContactIndexSection.sections(state.contacts)) { group in
-                    Section {
-                        ForEach(group.contacts) { contact in
-                            Button { selectedContactID = contact.id } label: {
-                                HStack(spacing: 12) {
-                                    ContactAvatarView(session: session, contact: contact, size: 36)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(contact.displayName).font(.body.weight(.medium)).foregroundStyle(.primary)
-                                        Text(session.configuration.name).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(.vertical, 4)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    } header: {
-                        if !group.contacts.isEmpty { Text(group.title).font(.footnote).textCase(nil) }
-                    }
-                    .sectionIndexLabel(group.title)
-                }
-            case .messages:
-                let threads = state.filteredThreads
-                ForEach(threads) { thread in
-                    NavigationLink {
-                        CommunicationThreadView(session: session, thread: thread, lines: state.lines)
-                    } label: {
-                        messageRow(thread)
-                    }
-                    .listRowSeparator(thread.id == threads.first?.id ? .hidden : .automatic, edges: .top)
-                    .accessibilityIdentifier("conversation-\(thread.id)")
-                    .swipeActions(allowsFullSwipe: false) {
-                        Button { deleting = thread.id } label: { Image(systemName: "trash") }
-                            .tint(.red)
-                            .accessibilityLabel(Text("communication.delete"))
-                    }
-                }
-            case .calls:
-                let calls = state.filteredCalls
-                ForEach(calls) { call in
-                    callRow(call)
-                        .listRowSeparator(call.id == calls.first?.id ? .hidden : .automatic, edges: .top)
-                        .swipeActions(allowsFullSwipe: false) {
-                            if call.terminal {
-                                Button { deleting = call.id } label: { Image(systemName: "trash") }
-                                    .tint(.red)
-                                    .accessibilityLabel(Text("communication.delete"))
-                            }
-                        }
-                }
-            }
-            if state.isEmpty {
+            if session.canAccessDevices {
+                rows
+            } else {
                 Group {
-                    if state.loading {
+                    if session.isRefreshing && session.failure == nil && !isRefreshing {
                         ProgressView("communication.loading").frame(maxWidth: .infinity)
-                    } else if !state.search.isEmpty && state.failure == nil {
-                        ContentUnavailableView.search(text: state.search)
                     } else {
                         emptyState
                     }
                 }
                 .listRowSeparator(.hidden)
             }
-            if !state.cursor.isEmpty {
-                Button("communication.more") { Task { await state.load(more: true) } }
-                    .frame(maxWidth: .infinity)
-                    .disabled(state.loading)
-            }
         }
         .listStyle(.plain)
-        .listSectionIndexVisibility(section == .contacts && !state.isEmpty ? .visible : .hidden)
+        .listSectionIndexVisibility(session.canAccessDevices && section == .contacts && !state.isEmpty ? .visible : .hidden)
         .contentMargins(.top, 0, for: .scrollContent)
         .scrollDismissesKeyboard(.interactively)
+        .refreshable { await refresh() }
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableView(section.emptyTitle, systemImage: section.icon)
+    }
+
+    @ViewBuilder private var rows: some View {
+        if section != .contacts {
+            filters
+                .padding(.bottom, 8)
+                .frame(minHeight: minimumRowHeight, alignment: .top)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                .listRowSeparator(.hidden)
+            HistoryAssignmentSection(session: session, lines: state.lines) {
+                await state.load(force: true)
+            }
+        }
+        switch section {
+        case .contacts:
+            ForEach(ContactIndexSection.sections(state.contacts)) { group in
+                Section {
+                    ForEach(group.contacts) { contact in
+                        Button { selectedContactID = contact.id } label: {
+                            HStack(spacing: 12) {
+                                ContactAvatarView(session: session, contact: contact, size: 36)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(contact.displayName).font(.body.weight(.medium)).foregroundStyle(.primary)
+                                    Text(session.configuration.name).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } header: {
+                    if !group.contacts.isEmpty { Text(group.title).font(.footnote).textCase(nil) }
+                }
+                .sectionIndexLabel(group.title)
+            }
+        case .messages:
+            let threads = state.filteredThreads
+            ForEach(threads) { thread in
+                NavigationLink {
+                    CommunicationThreadView(session: session, thread: thread, lines: state.lines)
+                } label: {
+                    messageRow(thread)
+                }
+                .listRowSeparator(thread.id == threads.first?.id ? .hidden : .automatic, edges: .top)
+                .accessibilityIdentifier("conversation-\(thread.id)")
+                .swipeActions(allowsFullSwipe: false) {
+                    Button { deleting = thread.id } label: { Image(systemName: "trash") }
+                        .tint(.red)
+                        .accessibilityLabel(Text("communication.delete"))
+                }
+            }
+        case .calls:
+            let calls = state.filteredCalls
+            ForEach(calls) { call in
+                callRow(call)
+                    .listRowSeparator(call.id == calls.first?.id ? .hidden : .automatic, edges: .top)
+                    .swipeActions(allowsFullSwipe: false) {
+                        if call.terminal {
+                            Button { deleting = call.id } label: { Image(systemName: "trash") }
+                                .tint(.red)
+                                .accessibilityLabel(Text("communication.delete"))
+                        }
+                    }
+            }
+        }
+        if state.isEmpty {
+            Group {
+                if state.loading && !isRefreshing {
+                    ProgressView("communication.loading").frame(maxWidth: .infinity)
+                } else if !state.search.isEmpty && state.failure == nil {
+                    ContentUnavailableView.search(text: state.search)
+                } else {
+                    emptyState
+                }
+            }
+            .listRowSeparator(.hidden)
+        }
+        if !state.cursor.isEmpty {
+            Button("communication.more") { Task { await state.load(more: true) } }
+                .frame(maxWidth: .infinity)
+                .disabled(state.loading)
+        }
+    }
+
+    private func refresh() async {
+        guard !isRefreshing, !Task.isCancelled else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        let failure: BackendFailure?
+        if session.canAccessDevices {
+            failure = await state.load(force: true)
+        } else {
+            await session.refresh(force: true)
+            failure = session.failure
+        }
+        if let failure, !Task.isCancelled { presentedFailure = failure }
     }
 
     private func messageRow(_ thread: CommunicationThread) -> some View {

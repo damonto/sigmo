@@ -15,7 +15,6 @@ final class CommunicationState {
     private(set) var lines: [CommunicationLine] = []
     private var hasLoadedMore = false
     private(set) var failure: BackendFailure?
-    var deletionFailure: BackendFailure?
     private(set) var loading = false
     private(set) var threads: [CommunicationThread] = []
     private(set) var calls: [CallRecord] = []
@@ -63,10 +62,12 @@ final class CommunicationState {
         failure = nil
     }
 
-    func load(more: Bool = false, force: Bool = false, automatic: Bool = false) async {
-        guard session.canAccessDevices, !Task.isCancelled else { return }
-        guard !more || (!loading && !cursor.isEmpty) else { return }
-        guard !automatic || (session.foreground && !loading && !hasLoadedMore) else { return }
+    // Return only the failure from the load that still owns the current results.
+    @discardableResult
+    func load(more: Bool = false, force: Bool = false, automatic: Bool = false) async -> BackendFailure? {
+        guard session.canAccessDevices, !Task.isCancelled else { return nil }
+        guard !more || (!loading && !cursor.isEmpty) else { return nil }
+        guard !automatic || (session.foreground && !loading && !hasLoadedMore) else { return nil }
         generation += 1
         let current = generation
         let access = session.accessRevision
@@ -82,27 +83,28 @@ final class CommunicationState {
                 try await session.refreshContacts(force: force)
             case .messages:
                 let page = try await session.protectedRequest { api, token in try await api.messageThreads(search: search, cursor: cursor, token: token) }
-                guard ownsLoad(current, accessRevision: access) else { return }
+                guard ownsLoad(current, accessRevision: access) else { return nil }
                 threads = more ? threads + page.items : page.items
                 self.cursor = page.nextCursor
                 hasLoadedMore = more
             case .calls:
                 let page = try await session.protectedRequest { api, token in try await api.callHistory(search: search, cursor: cursor, missed: missed, token: token) }
-                guard ownsLoad(current, accessRevision: access) else { return }
+                guard ownsLoad(current, accessRevision: access) else { return nil }
                 calls = more ? calls + page.items : page.items
                 self.cursor = page.nextCursor
                 hasLoadedMore = more
             }
-            guard ownsLoad(current, accessRevision: access) else { return }
+            guard ownsLoad(current, accessRevision: access) else { return nil }
             loading = false
             failure = nil
             let inventory = await metadata
-            guard ownsLoad(current, accessRevision: access) else { return }
-            if let inventory { lines = inventory }
+            if ownsLoad(current, accessRevision: access), let inventory { lines = inventory }
+            return nil
         } catch {
-            if ownsLoad(current, accessRevision: access) {
-                failure = .wrapping(error)
-            }
+            guard ownsLoad(current, accessRevision: access) else { return nil }
+            let failure = BackendFailure.wrapping(error)
+            self.failure = failure
+            return failure
         }
     }
 
@@ -120,8 +122,8 @@ final class CommunicationState {
         return inventory
     }
 
-    func delete(_ id: String) async {
-        deletionFailure = nil
+    @discardableResult
+    func delete(_ id: String) async -> BackendFailure? {
         do {
             let section = section
             try await session.protectedRequest { api, token in
@@ -132,13 +134,13 @@ final class CommunicationState {
                 }
             }
         } catch {
-            if !Task.isCancelled { deletionFailure = .wrapping(error) }
-            return
+            return Task.isCancelled ? nil : .wrapping(error)
         }
         threads.removeAll { $0.id == id }
         calls.removeAll { $0.id == id }
         await load(force: true)
         if section == .messages { await session.refreshUnreadCounts() }
+        return nil
     }
 }
 

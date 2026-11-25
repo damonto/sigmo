@@ -84,6 +84,11 @@ final class BackendFlowTests: XCTestCase {
         let carrier = app.staticTexts["modemCarrier-\(id)"]
         XCTAssertTrue(carrier.waitForExistence(timeout: 10))
         XCTAssertEqual(carrier.label, "Read 1")
+        let manage = app.navigationBars["Sigmo"].buttons["manageBackends"]
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(manage.exists && search.exists, app.debugDescription)
+        let toolbarToSearch = search.frame.minY - manage.frame.midY
+        XCTAssertLessThan(toolbarToSearch, manage.frame.height, "The Devices title should fit in the toolbar above search.")
         expectNoRefresh(carrier, seconds: 32)
 
         pullToRefresh(app)

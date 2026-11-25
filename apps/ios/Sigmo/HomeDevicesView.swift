@@ -30,7 +30,8 @@ struct HomeDevicesView: View {
     @Environment(\.demoSession) private var demoSession
     @State private var demo: DemoPresentation?
     @State private var demoFailure: BackendFailure?
-    let backendID: UUID?
+    @State private var refreshFailure: BackendFailure?
+    @Binding var backendID: UUID?
     @Binding var search: String
     var add: () -> Void
     var open: (BackendDestination) -> Void
@@ -154,6 +155,12 @@ struct HomeDevicesView: View {
         .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "home.search")
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
+        .refreshable {
+            await store.refreshAll()
+            guard !Task.isCancelled else { return }
+            refreshFailure = store.orderedSessions(backendID: backendID).compactMap(\.failure).first
+        }
+        .detailErrorAlert($refreshFailure)
     }
 
     private func deviceCard(_ device: HomeDevice) -> some View {

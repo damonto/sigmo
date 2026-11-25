@@ -114,6 +114,37 @@ final class CommunicationFlowTests: XCTestCase {
         XCTAssertTrue(app.buttons["Log In"].waitForExistence(timeout: 5))
     }
 
+    func testCommunicationTabsKeepInlineTitlesAndReportPullToRefreshFailures() {
+        let app = launch(scenario: "communication-unavailable")
+        let tabs = app.tabBars.buttons
+        XCTAssertTrue(tabs["Messages"].waitForExistence(timeout: 10))
+        let alert = app.alerts["Operation did not complete"]
+
+        for (tab, empty) in [("Messages", "No messages yet."), ("Calls", "No calls yet."),
+                             ("Contacts", "No contacts yet. Add your first contact.")] {
+            tabs[tab].tap()
+            let emptyState = app.staticTexts[empty]
+            XCTAssertTrue(emptyState.waitForExistence(timeout: 5))
+            let navigationBar = app.navigationBars[tab]
+            XCTAssertTrue(navigationBar.exists, app.debugDescription)
+            let backendFilter = navigationBar.buttons["communication-backend-filter"]
+            let search = app.searchFields.firstMatch
+            XCTAssertTrue(backendFilter.exists && search.exists, app.debugDescription)
+            // A large title would occupy its own row between the toolbar and search.
+            let toolbarToSearch = search.frame.minY - backendFilter.frame.midY
+            XCTAssertLessThan(toolbarToSearch, backendFilter.frame.height, "\(tab) inline title")
+            XCTAssertFalse(alert.exists)
+
+            let list = app.collectionViews.firstMatch
+            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+            let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
+            start.press(forDuration: 0.1, thenDragTo: end)
+            XCTAssertTrue(alert.waitForExistence(timeout: 5), "\(tab) refresh")
+            alert.buttons["OK"].tap()
+            XCTAssertTrue(emptyState.waitForExistence(timeout: 5))
+        }
+    }
+
     func testBackendMenuSharesAndRemembersCommunicationSelection() {
         let app = launch(multiple: true)
         let contacts = app.tabBars.buttons["Contacts"]
