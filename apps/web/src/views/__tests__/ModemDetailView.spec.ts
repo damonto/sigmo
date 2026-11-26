@@ -399,7 +399,7 @@ describe('ModemDetailView', () => {
     vi.clearAllMocks()
     api.unlockSim.mockResolvedValue(undefined)
     api.switchSimSlot.mockResolvedValue(undefined)
-    api.getTraffic.mockReset().mockResolvedValue({ connected: false, sample: null })
+    api.getTraffic.mockReset().mockResolvedValue({ connected: false, sessionId: '', sample: null })
     detailHarness.refreshModemList.mockResolvedValue(undefined)
     detailHarness.handleMsisdnUpdate.mockResolvedValue(true)
     detailHarness.handleInternetConnect.mockResolvedValue(undefined)
@@ -474,13 +474,14 @@ describe('ModemDetailView', () => {
       sessionId = 'session-1',
     ): InternetTrafficResponse => ({
       connected: true,
-      sample: { sessionId, elapsedMilliseconds, rxBytes, txBytes },
+      sessionId,
+      sample: { elapsedMilliseconds, rxBytes, txBytes },
     })
     api.getTraffic
       .mockResolvedValueOnce(response(1000, 2000, 1000))
       .mockResolvedValueOnce(response(3000, 1_002_000, 501_000))
       .mockResolvedValueOnce(response(4000, 1_002_000, 501_000))
-      .mockResolvedValueOnce({ connected: false, sample: null })
+      .mockResolvedValueOnce({ connected: false, sessionId: '', sample: null })
       .mockResolvedValueOnce(response(1500, 32, 8, 'session-2'))
 
     vi.useFakeTimers()

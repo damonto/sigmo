@@ -5,43 +5,44 @@ import XCTest
 final class ModemDetailTests: XCTestCase {
     func testInternetTrafficUsesSessionTimeAndKeepsThirtySeconds() {
         var history = InternetTrafficHistory()
-        history.append(trafficSample(at: 500, received: 1_000, sent: 200))
+        history.append(trafficSample(at: 500, received: 1_000, sent: 200), sessionID: "first")
         XCTAssertNil(history.rates)
         XCTAssertEqual(history.usedBytes, 1_200)
 
-        history.append(trafficSample(at: 2_500, received: 3_000, sent: 700))
+        history.append(trafficSample(at: 2_500, received: 3_000, sent: 700), sessionID: "first")
         XCTAssertEqual(history.rates, .init(download: 8_000, upload: 2_000))
         XCTAssertEqual(history.points.last?.bitsPerSecond, 10_000)
-        history.append(trafficSample(at: 2_000, received: 100, sent: 100))
+        history.append(trafficSample(at: 2_000, received: 100, sent: 100), sessionID: "first")
         XCTAssertEqual(history.usedBytes, 3_700)
 
         history.missSample()
         XCTAssertNil(history.rates)
-        history.append(trafficSample(at: 30_000, received: 3_000, sent: 700))
+        history.append(trafficSample(at: 30_000, received: 3_000, sent: 700), sessionID: "first")
         XCTAssertEqual(history.rates, .init(download: 0, upload: 0))
-        history.append(trafficSample(at: 33_000, received: 6_000, sent: 700))
+        history.append(trafficSample(at: 33_000, received: 6_000, sent: 700), sessionID: "first")
         XCTAssertEqual(history.points.map(\.elapsedMilliseconds), [30_000, 33_000])
     }
 
     func testInternetTrafficResetsOnSessionCounterAndSampleChanges() {
         var history = InternetTrafficHistory()
-        history.append(trafficSample(at: 1_000, received: 10, sent: 20))
-        history.append(trafficSample(at: 2_000, received: 100, sent: 200))
+        history.append(trafficSample(at: 1_000, received: 10, sent: 20), sessionID: "first")
+        history.append(trafficSample(at: 2_000, received: 100, sent: 200), sessionID: "first")
         XCTAssertNotNil(history.rates)
 
-        history.append(trafficSample(at: 500, received: 30, sent: 40, session: "next"))
+        history.append(trafficSample(at: 500, received: 30, sent: 40), sessionID: "next")
         XCTAssertNil(history.rates)
         XCTAssertTrue(history.points.isEmpty)
         XCTAssertEqual(history.usedBytes, 70)
 
-        history.append(trafficSample(at: 1_500, received: 29, sent: 80, session: "next"))
+        history.append(trafficSample(at: 1_500, received: 29, sent: 80), sessionID: "next")
         XCTAssertNil(history.rates)
         XCTAssertEqual(history.usedBytes, 109)
-        history.append(trafficSample(at: 32_000, received: .max, sent: 90, session: "next"))
+        history.append(trafficSample(at: 32_000, received: .max, sent: 90), sessionID: "next")
         XCTAssertNil(history.rates)
         XCTAssertEqual(history.usedBytes, .max)
 
-        history.append(nil)
+        history.append(nil, sessionID: "awaiting-counters")
+        XCTAssertEqual(history.sessionID, "awaiting-counters")
         XCTAssertNil(history.usedBytes)
         XCTAssertTrue(history.points.isEmpty)
     }
@@ -105,9 +106,8 @@ final class ModemDetailTests: XCTestCase {
         XCTAssertEqual(requests.count, 2, "The superseded observer must not send another request")
     }
 
-    private func trafficSample(at time: UInt64, received: UInt64, sent: UInt64,
-                               session: String = "first") -> InternetTrafficSample {
-        .init(sessionID: session, elapsedMilliseconds: time, rxBytes: received, txBytes: sent)
+    private func trafficSample(at time: UInt64, received: UInt64, sent: UInt64) -> InternetTrafficSample {
+        .init(elapsedMilliseconds: time, rxBytes: received, txBytes: sent)
     }
 
     func testReturningToSIMReusesInventoryUntilExplicitRefresh() async throws {

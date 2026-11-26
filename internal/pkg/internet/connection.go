@@ -46,6 +46,7 @@ type Preferences struct {
 
 type Connection struct {
 	Status          string
+	SessionID       string
 	APN             string
 	IPType          string
 	APNUsername     string
@@ -90,6 +91,7 @@ type Connector struct {
 	reloadModem        func(context.Context, *mmodem.Modem) (*mmodem.Modem, error)
 	qualcomm410        qualcomm410Ops
 	readLinkBytes      func(string) (netlink.LinkBytes, error)
+	speedTests         map[string]struct{}
 }
 
 type ConnectorConfig struct {
@@ -349,16 +351,19 @@ func (c *Connector) Current(ctx context.Context, modem *mmodem.Modem) (*Connecti
 		return nil, ErrOperationInProgress
 	}
 	defer lock.Release(1)
+	return c.currentModemLocked(ctx, access)
+}
 
-	airplaneMode, err := c.airplaneModeEnabled(ctx, modem)
+func (c *Connector) currentModemLocked(ctx context.Context, access modemAccess) (*Connection, error) {
+	airplaneMode, err := c.airplaneModeEnabled(ctx, access.modem)
 	if err != nil {
 		return nil, err
 	}
 	if airplaneMode {
 		return disconnectedConnection(c.preferenceWithAlwaysOn(ctx, access)), nil
 	}
-	if connection := c.qmapConnection(modem); connection != nil {
-		return c.qmapConnectionResponse(modem.EquipmentIdentifier, connection), nil
+	if connection := c.qmapConnection(access.modem); connection != nil {
+		return c.qmapConnectionResponse(access.id(), connection), nil
 	}
 	return c.currentLocked(ctx, access)
 }
@@ -409,7 +414,7 @@ func (c *Connector) currentLocked(ctx context.Context, modem internetModem) (*Co
 					prefs := preferencesWithDefaultAPNCredentials(modem, tracked.prefs)
 					tracked.prefs = prefs
 					c.setConnectionAndPreference(modemID, tracked, prefs)
-					connection, err := c.connectionFromBearer(ctx, modemID, bearer, prefs, tracked.routeMetric)
+					connection, err := c.connectionFromBearer(ctx, modemID, bearer, prefs, tracked.routeMetric, tracked.sessionID())
 					if err == nil {
 						return connection, nil
 					}
@@ -451,7 +456,7 @@ func (c *Connector) currentLocked(ctx context.Context, modem internetModem) (*Co
 		tracked.prefs = preferencesWithDefaultAPNCredentials(modem, tracked.prefs)
 		tracked.profileID = modem.profileID()
 		c.setConnectionAndPreference(modemID, tracked, tracked.prefs)
-		return c.connectionFromBearer(ctx, modemID, bearer, tracked.prefs, metric)
+		return c.connectionFromBearer(ctx, modemID, bearer, tracked.prefs, metric, tracked.sessionID())
 	}
 	return nil, ErrUnsupportedIPMethod
 }
@@ -599,7 +604,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 	tracked.bearerPath = bearer.Path()
 	tracked.modemGeneration = modem.generation()
 	tracked.profileID = profileID
-	tracked.traffic = c.startConnectionTraffic(tracked.interfaceName)
+	c.startConnectionMonitoring(&tracked)
 	if prefs.DefaultRoute {
 		tracked, err = c.updateTrackedDefaultRoute(ctx, modemID, tracked, true)
 		if err != nil {
@@ -616,7 +621,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 		}
 	}
 
-	connection, err := c.connectionFromBearer(ctx, modemID, bearer, prefs, tracked.routeMetric)
+	connection, err := c.connectionFromBearer(ctx, modemID, bearer, prefs, tracked.routeMetric, tracked.sessionID())
 	if err != nil {
 		return nil, err
 	}
@@ -752,6 +757,7 @@ func (c *Connector) disconnect(ctx context.Context, modem internetModem, clearAl
 }
 
 func (c *Connector) cleanupTracked(ctx context.Context, modemID string, tracked trackedConnection) error {
+	tracked.diagnostics.retire()
 	err := c.cleanupProxy(ctx, modemID, tracked.interfaceName)
 	cleanup := tracked
 	if !tracked.prefs.DefaultRoute {
@@ -1152,6 +1158,9 @@ func (c *Connector) setConnectionAndPreference(modemID string, tracked trackedCo
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if previous := c.connections[modemID]; previous.diagnostics != tracked.diagnostics {
+		previous.diagnostics.retire()
+	}
 	c.connections[modemID] = tracked
 	if c.preferenceProfiles == nil {
 		c.preferenceProfiles = make(map[string]string)
@@ -1164,6 +1173,7 @@ func (c *Connector) deleteConnection(modemID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.connections[modemID].diagnostics.retire()
 	delete(c.connections, modemID)
 }
 
@@ -1178,6 +1188,7 @@ func (c *Connector) deleteConnectionAndPreference(modemID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.connections[modemID].diagnostics.retire()
 	delete(c.connections, modemID)
 	delete(c.preferences, modemID)
 }
@@ -1219,10 +1230,13 @@ func hasInternetPreference(prefs Preferences) bool {
 		prefs.ProxyEnabled
 }
 
-func (c *Connector) connectionFromBearer(ctx context.Context, modemID string, bearer *mmodem.Bearer, prefs Preferences, metric int) (*Connection, error) {
+func (c *Connector) connectionFromBearer(ctx context.Context, modemID string, bearer *mmodem.Bearer, prefs Preferences, metric int, sessionID string) (*Connection, error) {
 	connection, err := connectionFromBearer(ctx, bearer, prefs, metric)
 	if err != nil {
 		return nil, err
+	}
+	if connection.Status == StatusConnected {
+		connection.SessionID = sessionID
 	}
 	if proxy := c.proxyInstance(); proxy != nil && strings.TrimSpace(connection.InterfaceName) != "" {
 		connection.Proxy = proxy.Status(modemID)

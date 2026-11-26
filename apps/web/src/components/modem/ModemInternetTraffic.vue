@@ -3,16 +3,19 @@ import { computed, onUnmounted, useTemplateRef, watch } from 'vue'
 import { usePreferredReducedMotion } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 
+import RegionFlag from '@/components/RegionFlag.vue'
 import {
   TRAFFIC_WINDOW_MS,
   type TrafficPoint,
   type TrafficRates,
 } from '@/composables/useModemTraffic'
+import type { InternetPublicResponse } from '@/types/internet'
 
 const props = defineProps<{
   rates: TrafficRates | null
   usedBytes: number | null
   history: TrafficPoint[]
+  publicInfo: InternetPublicResponse | null
 }>()
 
 const { locale, t } = useI18n()
@@ -36,6 +39,14 @@ const upload = computed(() => format(props.rates?.upload ?? null, speedUnits))
 const usage = computed(() => format(props.usedBytes, ['B', 'kB', 'MB', 'GB', 'TB']))
 const idle = computed(() => props.rates?.download === 0 && props.rates.upload === 0)
 const latestPoint = computed(() => props.history[props.history.length - 1])
+const publicIP = computed(() => props.publicInfo?.ip?.trim() ?? '')
+const publicISP = computed(
+  () => props.publicInfo?.isp?.trim() || props.publicInfo?.organization?.trim(),
+)
+const publicRegion = computed(() => {
+  const code = props.publicInfo?.country?.trim().toUpperCase() ?? ''
+  return /^[A-Z]{2}$/.test(code) ? code : ''
+})
 
 const paths = computed(() => {
   const first = props.history[0]
@@ -158,6 +169,34 @@ onUnmounted(() => animation?.cancel())
       <div class="flex flex-wrap items-baseline gap-x-2">
         <dt class="text-muted-foreground">{{ t('modemDetail.overview.traffic.usage') }}</dt>
         <dd class="font-semibold tabular-nums">{{ usage.value }} {{ usage.unit }}</dd>
+      </div>
+    </dl>
+    <dl
+      v-if="publicIP"
+      class="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-primary/15 pt-2 text-xs"
+    >
+      <div
+        v-if="publicRegion || publicISP"
+        class="flex min-w-0 items-center gap-1.5"
+      >
+        <dt class="sr-only">{{ t('modemDetail.settings.internetEgressProvider') }}</dt>
+        <dd class="flex min-w-0 items-center gap-1.5 font-medium">
+          <RegionFlag
+            v-if="publicRegion"
+            :region-code="publicRegion"
+            class="shrink-0 rounded-sm"
+            role="img"
+          />
+          <span
+            v-if="publicISP"
+            class="wrap-anywhere"
+            >{{ publicISP }}</span
+          >
+        </dd>
+      </div>
+      <div class="ms-auto min-w-0">
+        <dt class="sr-only">{{ t('modemDetail.settings.internetEgressIP') }}</dt>
+        <dd class="font-mono wrap-anywhere select-text">{{ publicIP }}</dd>
       </div>
     </dl>
   </section>

@@ -1,11 +1,15 @@
 import { fetchJson } from '@/lib/fetch'
 
-import { parseInternetTrafficResponse } from '@/types/internet'
+import {
+  parseInternetPublicResponse,
+  parseInternetSpeedTestResponse,
+  parseInternetTrafficResponse,
+} from '@/types/internet'
 import type {
   ConnectInternetPayload,
   InternetConnectionPreferencesPayload,
   InternetConnectionResponse,
-  InternetPublicResponse,
+  InternetSpeedTestSize,
 } from '@/types/internet'
 
 export const useInternetApi = () => {
@@ -13,8 +17,13 @@ export const useInternetApi = () => {
     return fetchJson<InternetConnectionResponse>(`modems/${id}/internet-connections/current`)
   }
 
-  const getPublic = (id: string) => {
-    return fetchJson<InternetPublicResponse>(`modems/${id}/internet-connections/public`)
+  const getPublic = async (id: string, signal: AbortSignal) => {
+    const { data } = await fetchJson<unknown>(
+      `modems/${encodeURIComponent(id)}/internet-connections/public`,
+      { signal },
+      true,
+    )
+    return parseInternetPublicResponse(data.value)
   }
 
   const getTraffic = async (id: string, signal: AbortSignal) => {
@@ -49,6 +58,29 @@ export const useInternetApi = () => {
     )
   }
 
+  const getLatestSpeedTest = async (id: string, signal: AbortSignal) => {
+    const { data } = await fetchJson<unknown>(
+      `modems/${encodeURIComponent(id)}/internet-connections/speed-tests/latest`,
+      { signal },
+      true,
+    )
+    return parseInternetSpeedTestResponse(data.value)
+  }
+
+  const runSpeedTest = async (
+    id: string,
+    iccid: string,
+    sizeMB: InternetSpeedTestSize,
+    signal: AbortSignal,
+  ) => {
+    const { data } = await fetchJson<unknown>(
+      `modems/${encodeURIComponent(id)}/internet-connections/speed-tests`,
+      { method: 'POST', body: JSON.stringify({ iccid, sizeMB }), signal },
+      true,
+    )
+    return parseInternetSpeedTestResponse(data.value)
+  }
+
   return {
     getCurrentConnection,
     getPublic,
@@ -56,5 +88,7 @@ export const useInternetApi = () => {
     connect,
     disconnect,
     updatePreferences,
+    getLatestSpeedTest,
+    runSpeedTest,
   }
 }

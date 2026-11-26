@@ -22,6 +22,7 @@ struct ConnectionFixture: Sendable {
     var scanErrorCode: String?
     var scanStarted = false
     var internet = ConnectionFixtureInternet()
+    var publicIPAddress: String?
     var wifi = DetailWiFiSettings(enabled: false, underlay: .init(mode: "modem", modemId: "device-2"),
                                   connected: false, state: "disconnected", lastError: nil)
     var volte = VoLTESettings(enabled: true, connected: true, state: "connected", durationSeconds: 120,
@@ -32,9 +33,10 @@ struct ConnectionFixture: Sendable {
     var statuses: [String: Int] = [:]
     var busyInternetReads: [String: Int] = [:]
     var disconnectAfterWrite = false
+    private var speedTests: [String: InternetSpeedTestResult] = [:]
     private var sheets: Set<String> = []
 
-    mutating func respond(_ request: URLRequest, resource: String, modemID: String, airplane: Bool) throws -> BackendHTTPResponse? {
+    mutating func respond(_ request: URLRequest, resource: String, modemID: String, iccid: String, airplane: Bool) throws -> BackendHTTPResponse? {
         guard resource.hasPrefix("/internet-connections") || resource.hasPrefix("/wifi-calling/")
                 || resource == "/volte/settings" || resource == "/network-settings/registration"
                 || resource.hasPrefix("/network-scans") else { return nil }
@@ -71,7 +73,6 @@ struct ConnectionFixture: Sendable {
             if airplane { current.connected = false }
             return try reply(current)
         case ("GET", "/internet-connections/current/traffic"):
-            guard internet.trafficEnabled else { return error("resource_not_found", status: 404) }
             return try reply(internet.nextTrafficSample(airplane: airplane))
         case ("POST", "/internet-connections"):
             if airplane { return error("internet_airplane_mode", status: 409) }
@@ -93,7 +94,20 @@ struct ConnectionFixture: Sendable {
             return try reply(internet)
         case ("GET", "/internet-connections/public"):
             guard internet.connected else { return error("internet_connection_not_connected", status: 409) }
-            return try reply(InternetPublicInfo(ip: "203.0.113.\(internet.bearer)", country: "GB", organization: "Fixture Mobile Network"))
+            return try reply(InternetPublicInfo(ip: publicIPAddress ?? "203.0.113.\(internet.bearer)", country: "GB",
+                                                organization: "Fixture Mobile Network", isp: "Fixture ISP"))
+        case ("GET", "/internet-connections/speed-tests/latest"):
+            return try reply(InternetSpeedTestStatus(iccid: iccid, result: speedTests[iccid]))
+        case ("POST", "/internet-connections/speed-tests"):
+            let request = try JSONDecoder().decode(InternetSpeedTestRequest.self, from: data)
+            if let size = request.sizeMB, InternetSpeedTestSize(rawValue: size) == nil {
+                return error("invalid_request", status: 422)
+            }
+            guard !iccid.isEmpty, request.iccid == iccid else { return error("sim_target_changed", status: 409) }
+            guard internet.connected, !airplane else { return error("internet_connection_not_connected", status: 409) }
+            let result = InternetSpeedTestResult(downloadBps: 92_400_000, uploadBps: 15_200_000, testedAt: .now)
+            speedTests[iccid] = result
+            return try reply(InternetSpeedTestStatus(iccid: iccid, result: result))
         case ("POST", "/wifi-calling/connectivity-checks"):
             let input = try JSONDecoder().decode([String: String].self, from: data)
             guard input["proxyId"] == "fixture-proxy" else { return error("resource_not_found", status: 404) }
@@ -213,7 +227,9 @@ struct ConnectionFixture: Sendable {
     }
 
     private func reply<Value: Encodable>(_ value: Value, status: Int = 200) throws -> BackendHTTPResponse {
-        BackendHTTPResponse(data: try JSONEncoder().encode(value), status: status)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return BackendHTTPResponse(data: try encoder.encode(value), status: status)
     }
     private func error(_ code: String, status: Int) -> BackendHTTPResponse {
         return HTTPProblem.response(status: status, code: code, detail: "Fixture connection error")
@@ -237,22 +253,23 @@ struct ConnectionFixtureInternet: Encodable, Sendable {
     }
 
     mutating func nextTrafficSample(airplane: Bool) -> InternetTrafficResponse {
-        guard connected, !airplane else { return .init(connected: false, sample: nil) }
-        let counter = InternetTrafficSample(sessionID: String(bearer), elapsedMilliseconds: elapsed,
-                                            rxBytes: received, txBytes: sent)
+        guard trafficEnabled, connected, !airplane else { return .init(connected: false, sample: nil, sessionID: "") }
+        let counter = InternetTrafficSample(elapsedMilliseconds: elapsed, rxBytes: received, txBytes: sent)
         received += elapsed.isMultiple(of: 3_000) ? 250_000 : 125_000
         sent += 25_000
         elapsed += 1_000
-        return .init(connected: true, sample: counter)
+        return .init(connected: true, sample: counter, sessionID: String(bearer))
     }
 
     private enum CodingKeys: String, CodingKey {
         case status, proxy, interfaceName, bearer, ipv4Addresses, ipv6Addresses, dns, durationSeconds, txBytes, rxBytes, routeMetric
+        case sessionID = "sessionId"
     }
     func encode(to encoder: Encoder) throws {
         try preferences.encode(to: encoder)
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(connected ? "connected" : "disconnected", forKey: .status)
+        if connected { try values.encode(String(bearer), forKey: .sessionID) }
         try values.encode(connected ? "wwan0" : "", forKey: .interfaceName)
         try values.encode(connected ? bearer : 0, forKey: .bearer)
         try values.encode(connected ? ["10.0.0.2/24"] : [], forKey: .ipv4Addresses)

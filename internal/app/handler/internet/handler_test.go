@@ -1,6 +1,7 @@
 package internet
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,9 +11,69 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
+	"github.com/damonto/sigmo/internal/pkg/apierror"
 	internetcore "github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/validator"
 )
+
+func TestSpeedTestRequestSize(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		body string
+		want internetcore.SpeedTestSize
+	}{
+		{"omitted", `{"iccid":"sim-1"}`, 10},
+		{"null", `{"iccid":"sim-1","sizeMB":null}`, 10},
+		{"selected", `{"iccid":"sim-1","sizeMB":50}`, 50},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			c := e.NewContext(req, httptest.NewRecorder())
+			var input SpeedTestRequest
+			if err := httpapi.BindJSON(c, &input, "invalid_iccid"); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := input.size(); err != nil || got != tt.want {
+				t.Errorf("size = %d MB, %v, want %d MB", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunSpeedTestRejectsInvalidSizeBeforeModemLookup(t *testing.T) {
+	t.Parallel()
+	e := echo.New()
+	var err error
+	e.Validator, err = validator.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.HTTPErrorHandler = httpapi.HTTPErrorHandler
+	e.POST("/modems/:id/internet-connections/speed-tests", (&Handler{}).RunSpeedTest)
+	for _, value := range []string{"0", "-10", "20", "101", "25.5", `"50"`, "true", "{}"} {
+		t.Run(value, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/modems/modem-1/internet-connections/speed-tests",
+				strings.NewReader(`{"iccid":"sim-1","sizeMB":`+value+`}`))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
+			}
+			var problem apierror.Problem
+			if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+				t.Fatal(err)
+			}
+			if problem.ErrorCode != "invalid_request" {
+				t.Errorf("error_code = %q, want invalid_request", problem.ErrorCode)
+			}
+		})
+	}
+}
 
 func TestModemLookupError(t *testing.T) {
 	t.Parallel()
@@ -115,6 +176,12 @@ func TestInternetError(t *testing.T) {
 			wantBody:   "internet_connection_not_connected",
 		},
 		{
+			name:       "active SIM changed",
+			err:        mmodem.ErrSIMChanged,
+			wantStatus: http.StatusConflict,
+			wantBody:   "sim_target_changed",
+		},
+		{
 			name:       "airplane mode",
 			err:        internetcore.ErrAirplaneMode,
 			wantStatus: http.StatusConflict,
@@ -159,11 +226,13 @@ func TestResponseFromPublic(t *testing.T) {
 				IP:           "209.9.201.161",
 				Country:      "HK",
 				Organization: "AS4760 HKT Limited",
+				ISP:          "HKT",
 			},
 			want: PublicResponse{
 				IP:           "209.9.201.161",
 				Country:      "HK",
 				Organization: "AS4760 HKT Limited",
+				ISP:          "HKT",
 			},
 		},
 	}
@@ -193,6 +262,7 @@ func TestResponseFromConnection(t *testing.T) {
 			name: "connected with proxy",
 			connection: &internetcore.Connection{
 				Status:          internetcore.StatusConnected,
+				SessionID:       "session-1",
 				APN:             "internet",
 				IPType:          "ipv4",
 				APNUsername:     "user",
@@ -214,6 +284,7 @@ func TestResponseFromConnection(t *testing.T) {
 			},
 			want: ConnectionResponse{
 				Status:          internetcore.StatusConnected,
+				SessionID:       "session-1",
 				APN:             "internet",
 				IPType:          "ipv4",
 				APNUsername:     "user",
@@ -243,6 +314,7 @@ func TestResponseFromConnection(t *testing.T) {
 
 			got := ResponseFromConnection(tt.connection)
 			if got.Status != tt.want.Status ||
+				got.SessionID != tt.want.SessionID ||
 				got.APN != tt.want.APN ||
 				got.IPType != tt.want.IPType ||
 				got.APNUsername != tt.want.APNUsername ||

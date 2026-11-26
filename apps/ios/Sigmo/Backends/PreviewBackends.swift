@@ -46,7 +46,7 @@ enum PreviewBackends {
                 switch scenario {
                 case "detail-loading": fixture = .delayedProfiles
                 case "detail-refresh": fixture = .profileRefresh
-                case "detail-roaming", "detail-traffic": fixture = .networkCardBranding
+                case "detail-roaming", "detail-traffic", "detail-traffic-ipv6": fixture = .networkCardBranding
                 case "detail-unavailable": fixture = .unavailableProfiles
                 case "detail-single": fixture = .singleHardware
                 case "detail-notifications": fixture = .notifications
@@ -80,7 +80,10 @@ enum PreviewBackends {
                 default: fixture = .standard
                 }
                 var connection = ConnectionFixture()
-                connection.internet.trafficEnabled = scenario == "detail-traffic"
+                connection.internet.trafficEnabled = scenario == "detail-traffic" || scenario == "detail-traffic-ipv6"
+                if scenario == "detail-traffic-ipv6" {
+                    connection.publicIPAddress = "2001:0db8:1234:5678:90ab:cdef:1234:5678"
+                }
                 if scenario == "detail-roaming" {
                     connection.registrationState = "Roaming"
                     connection.registeredOperator = .init(name: "Travel Mobile", code: "23410")

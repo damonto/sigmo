@@ -45,6 +45,17 @@ extension BackendAPI {
         try await readInternet(["modems", modem, "internet-connections", "public"], token: token, timeout: .hardware)
     }
 
+    func latestInternetSpeedTest(_ modem: String, token: String?) async throws -> InternetSpeedTestStatus {
+        try await decode(["modems", modem, "internet-connections", "speed-tests", "latest"], token: token)
+    }
+
+    func runInternetSpeedTest(_ modem: String, iccid: String, size: InternetSpeedTestSize,
+                              token: String?) async throws -> InternetSpeedTestStatus {
+        try await decode(["modems", modem, "internet-connections", "speed-tests"], method: "POST",
+                         body: JSONEncoder().encode(InternetSpeedTestRequest(iccid: iccid, sizeMB: size.rawValue)),
+                         token: token, timeout: .speedTest)
+    }
+
     private func readInternet<Value: Decodable & Sendable>(_ path: [String], token: String?, timeout: BackendRequestTimeout) async throws -> Value {
         // Status reads share the modem lock with background connection work.
         // Retry only this temporary conflict, with a bounded, cancellable wait; never replay writes.

@@ -29,6 +29,22 @@ func (c *Connectivity) Public(ctx context.Context, modem *mmodem.Modem) (pintern
 	return c.internet.Public(ctx, modem)
 }
 
+// LatestSpeedTest reads the last successful result for the current SIM.
+func (c *Connectivity) LatestSpeedTest(ctx context.Context, modem *mmodem.Modem) (pinternet.SpeedTestStatus, error) {
+	if c == nil || c.internet == nil {
+		return pinternet.SpeedTestStatus{}, ErrUnavailable
+	}
+	return c.internet.LatestSpeedTest(ctx, modem)
+}
+
+// RunSpeedTest measures the current Internet connection without changing IMS state.
+func (c *Connectivity) RunSpeedTest(ctx context.Context, modem *mmodem.Modem, iccid string, size pinternet.SpeedTestSize) (pinternet.SpeedTestStatus, error) {
+	if c == nil || c.internet == nil {
+		return pinternet.SpeedTestStatus{}, ErrUnavailable
+	}
+	return c.internet.RunSpeedTest(ctx, modem, iccid, size)
+}
+
 func (c *Connectivity) Connect(ctx context.Context, modem *mmodem.Modem, preferences pinternet.Preferences) (*pinternet.Connection, error) {
 	if c == nil || c.internet == nil {
 		return nil, ErrUnavailable

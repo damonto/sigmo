@@ -4,18 +4,18 @@ import Observation
 struct InternetTrafficResponse: Codable, Sendable {
     let connected: Bool
     let sample: InternetTrafficSample?
+    let sessionID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case connected, sample
+        case sessionID = "sessionId"
+    }
 }
 
 struct InternetTrafficSample: Codable, Sendable {
-    let sessionID: String
     let elapsedMilliseconds: UInt64
     let rxBytes: UInt64
     let txBytes: UInt64
-
-    private enum CodingKeys: String, CodingKey {
-        case sessionID = "sessionId"
-        case elapsedMilliseconds, rxBytes, txBytes
-    }
 }
 
 struct InternetTrafficHistory {
@@ -35,15 +35,17 @@ struct InternetTrafficHistory {
     private(set) var rates: Rates?
     private(set) var usedBytes: UInt64?
     private(set) var points: [Point] = []
+    private(set) var sessionID: String?
     private var previous: InternetTrafficSample?
 
-    mutating func append(_ sample: InternetTrafficSample?) {
-        guard let sample else {
+    mutating func append(_ sample: InternetTrafficSample?, sessionID: String) {
+        if self.sessionID != sessionID || sample == nil {
             self = .init()
-            return
+            self.sessionID = sessionID
         }
+        guard let sample else { return }
 
-        let prior = previous.flatMap { $0.sessionID == sample.sessionID ? $0 : nil }
+        let prior = previous
         if let prior, sample.elapsedMilliseconds <= prior.elapsedMilliseconds { return }
 
         let (total, overflow) = sample.rxBytes.addingReportingOverflow(sample.txBytes)
@@ -79,6 +81,7 @@ struct InternetTrafficHistory {
 final class InternetTrafficState {
     private(set) var connectedTarget: ModemSIMTarget?
     private(set) var history = InternetTrafficHistory()
+    var sessionID: String? { history.sessionID }
     @ObservationIgnored private var observationID: UUID?
 
     func observe(_ detail: ModemDetailState, target: ModemSIMTarget) async {
@@ -107,15 +110,14 @@ final class InternetTrafficState {
                 }
                 guard isCurrent() else { return }
                 lastResponse = .now
-                if result.connected {
-                    history.append(result.sample)
+                if result.connected, !result.sessionID.isEmpty {
+                    history.append(result.sample, sessionID: result.sessionID)
                     if connectedTarget != target { connectedTarget = target }
                 } else {
                     clear()
                 }
             } catch {
                 guard isCurrent() else { return }
-                if let failure = error as? BackendFailure, failure.status == 404 || failure.status == 405 { return }
                 if lastResponse.duration(to: .now) >= .seconds(5) {
                     clear()
                 } else {

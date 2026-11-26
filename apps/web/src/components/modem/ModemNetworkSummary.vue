@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 
 import ModemInternetTraffic from '@/components/modem/ModemInternetTraffic.vue'
 import { useModemDisplay } from '@/composables/useModemDisplay'
+import { useModemPublicIP } from '@/composables/useModemPublicIP'
 import { useModemTraffic } from '@/composables/useModemTraffic'
 import type { Modem } from '@/types/modem'
 
@@ -12,10 +13,16 @@ const props = defineProps<{ modem: Modem }>()
 defineSlots<{ default?(): unknown }>()
 const { t } = useI18n()
 const { formatSignal, signalIcon } = useModemDisplay()
-const { connected, rates, usedBytes, history } = useModemTraffic(
-  computed(() => props.modem.id),
-  computed(() => props.modem.sim.identifier),
+const modemId = computed(() => props.modem.id)
+const simId = computed(() => props.modem.sim.identifier)
+const { connected, sessionId, rates, usedBytes, history } = useModemTraffic(
+  modemId,
+  simId,
   computed(() => !props.modem.airplaneMode && props.modem.state !== 'locked'),
+)
+const publicInfo = useModemPublicIP(
+  modemId,
+  computed(() => sessionId.value ?? ''),
 )
 
 const NEUTRAL_STATUS = 'bg-muted-foreground/10 text-muted-foreground'
@@ -202,6 +209,7 @@ const voiceServices = computed(
       :rates="rates"
       :used-bytes="usedBytes"
       :history="history"
+      :public-info="publicInfo"
     />
   </div>
 </template>

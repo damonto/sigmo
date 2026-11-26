@@ -6,7 +6,7 @@ struct InternetView: View {
         case options(InternetConnectionOptions, keyPath: WritableKeyPath<InternetConnectionOptions, Bool>)
     }
     private struct PublicLookup: Equatable {
-        let connectionID: String
+        let sessionID: String
         let retry: Int
     }
     @State private var state: InternetState
@@ -26,7 +26,7 @@ struct InternetView: View {
 
     var body: some View {
         let target = trafficTarget
-        let lookup = state.connection.flatMap(\.connectionID).map { PublicLookup(connectionID: $0, retry: publicRetry) }
+        let lookup = state.connection.flatMap(\.sessionID).map { PublicLookup(sessionID: $0, retry: publicRetry) }
         let action = action
         return Form {
             ConnectionRadioNotice(scope: state.scope)
@@ -34,6 +34,7 @@ struct InternetView: View {
                 InternetTrafficCard(traffic: traffic, target: target, accent: .accentColor, status: state.status)
                     .listRowInsets(EdgeInsets())
             }
+            InternetSpeedTestSection(state: state, updatingConnection: action != nil)
             if state.connection != nil {
                 connectionOptions
                 configuration
@@ -49,12 +50,18 @@ struct InternetView: View {
             if let target { await traffic.observe(state.scope.detail, target: target) }
         }
         .task(id: lookup) {
-            if let lookup, lookup.connectionID == state.connection?.connectionID { await state.loadPublic() }
+            if let lookup, lookup.sessionID == state.connection?.sessionID { await state.loadPublic() }
+        }
+        .task(id: scenePhase == .active && state.scope.available) {
+            if scenePhase == .active { await state.loadSpeedTest() }
         }
         .task(id: action?.id) {
             if let action { await perform(action) }
         }
-        .refreshable { await state.reload() }
+        .refreshable {
+            await state.reload()
+            await state.loadSpeedTest()
+        }
         .detailErrorAlert($state.failure)
     }
 

@@ -40,11 +40,13 @@ func (c *Connector) invalidateModemGeneration(ctx context.Context, modemID strin
 	)
 	c.mu.Lock()
 	if current, ok := c.connections[modemID]; ok && current.modemGeneration == generation {
+		current.diagnostics.retire()
 		copy := current
 		tracked = &copy
 		delete(c.connections, modemID)
 	}
 	if current := c.qmapConnections[modemID]; current != nil && current.generation == generation {
+		current.tracked.diagnostics.retire()
 		qmap = current
 		delete(c.qmapConnections, modemID)
 	}

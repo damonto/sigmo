@@ -49,11 +49,11 @@ func (h *Handler) Traffic(c *echo.Context) error {
 	if err != nil {
 		return internetError(c, err, errorCode)
 	}
-	response := TrafficResponse{Connected: traffic.Connected}
+	response := TrafficResponse{Connected: traffic.Connected, SessionID: traffic.SessionID}
 	if sample := traffic.Sample; sample != nil {
 		response.Sample = &TrafficSample{
-			SessionID: sample.SessionID, ElapsedMilliseconds: sample.ElapsedMilliseconds,
-			RXBytes: sample.RXBytes, TXBytes: sample.TXBytes,
+			ElapsedMilliseconds: sample.ElapsedMilliseconds,
+			RXBytes:             sample.RXBytes, TXBytes: sample.TXBytes,
 		}
 	}
 	return c.JSON(http.StatusOK, response)
@@ -70,6 +70,54 @@ func (h *Handler) Public(c *echo.Context) error {
 		return internetError(c, err, "internet_public_failed")
 	}
 	return c.JSON(http.StatusOK, ResponseFromPublic(info))
+}
+
+// LatestSpeedTest serves a stored result without generating measurement traffic.
+func (h *Handler) LatestSpeedTest(c *echo.Context) error {
+	const errorCode = "internet_speed_test_failed"
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCode)
+	}
+	status, err := h.connections.LatestSpeedTest(ctx, modem)
+	if err != nil {
+		return internetError(c, err, errorCode)
+	}
+	return c.JSON(http.StatusOK, speedTestResponse(status))
+}
+
+// RunSpeedTest measures and replaces the current SIM's saved result.
+func (h *Handler) RunSpeedTest(c *echo.Context) error {
+	const errorCode = "internet_speed_test_failed"
+	ctx := c.Request().Context()
+	var req SpeedTestRequest
+	if err := httpapi.BindAndValidate(c, &req, "invalid_iccid"); err != nil {
+		return err
+	}
+	size, err := req.size()
+	if err != nil {
+		return httpapi.UnprocessableEntity(c, "invalid_request", err)
+	}
+	modem, err := h.registry.Find(ctx, c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCode)
+	}
+	status, err := h.connections.RunSpeedTest(ctx, modem, req.ICCID, size)
+	if err != nil {
+		return internetError(c, err, errorCode)
+	}
+	return c.JSON(http.StatusOK, speedTestResponse(status))
+}
+
+func speedTestResponse(status internetcore.SpeedTestStatus) SpeedTestResponse {
+	response := SpeedTestResponse{ICCID: status.ICCID}
+	if result := status.Result; result != nil {
+		response.Result = &SpeedTestResult{
+			DownloadBPS: result.DownloadBPS, UploadBPS: result.UploadBPS, TestedAt: result.TestedAt.UTC(),
+		}
+	}
+	return response
 }
 
 func (h *Handler) Connect(c *echo.Context) error {
@@ -139,6 +187,9 @@ func (h *Handler) Disconnect(c *echo.Context) error {
 }
 
 func internetError(c *echo.Context, err error, internalErrorCode string) error {
+	if errors.Is(err, mmodem.ErrSIMChanged) {
+		return httpapi.Error(c, http.StatusConflict, "sim_target_changed", mmodem.ErrSIMChanged.Error())
+	}
 	if errors.Is(err, internetcore.ErrOperationInProgress) {
 		return httpapi.Error(c, http.StatusConflict, "internet_operation_in_progress", internetcore.ErrOperationInProgress.Error())
 	}
@@ -182,6 +233,7 @@ func ResponseFromConnection(connection *internetcore.Connection) ConnectionRespo
 	}
 	return ConnectionResponse{
 		Status:          connection.Status,
+		SessionID:       connection.SessionID,
 		APN:             connection.APN,
 		IPType:          connection.IPType,
 		APNUsername:     connection.APNUsername,
@@ -218,5 +270,6 @@ func ResponseFromPublic(info internetcore.PublicIPInfo) PublicResponse {
 		IP:           info.IP,
 		Country:      info.Country,
 		Organization: info.Organization,
+		ISP:          info.ISP,
 	}
 }

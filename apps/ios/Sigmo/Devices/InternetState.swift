@@ -12,12 +12,17 @@ final class InternetState {
     private(set) var publicInfo: InternetPublicInfo?
     private(set) var publicFailure: BackendFailure?
     private(set) var publicLoading = false
+    private(set) var speedTestFailure: BackendFailure?
+    private(set) var speedTestReadFailed = false
+    private(set) var speedTesting = false
     private(set) var observedAt = Date()
     var failure: BackendFailure?
     @ObservationIgnored private var readRevision = 0
     @ObservationIgnored private var publicRevision = 0
-    @ObservationIgnored private var publicConnectionID: String?
+    @ObservationIgnored private var publicSessionID: String?
     @ObservationIgnored private var draftBaseline: InternetPreferences?
+    private var speedTestStatus: InternetSpeedTestStatus?
+    private var speedTestLoading = false
 
     init(detail: ModemDetailState, profileID: String?) {
         scope = ProfileConnectionScope(detail: detail, profileID: profileID)
@@ -28,6 +33,10 @@ final class InternetState {
     var canChange: Bool { scope.radioAvailable && connection?.knownStatus == true && loadFailure == nil && !busy }
     var canEditAPN: Bool { scope.available && connection?.knownStatus == true && loadFailure == nil && !busy && !connected }
     var canEditOptions: Bool { canEditAPN || canChange }
+    var speedTest: InternetSpeedTestResult? { speedTestStatus?.result }
+    var canRunSpeedTest: Bool {
+        connected && canChange && speedTestStatus != nil && !speedTestReadFailed && !speedTestLoading && !speedTesting
+    }
     var options: InternetConnectionOptions { connected ? connection?.preferences.connectionOptions ?? draft.connectionOptions : draft.connectionOptions }
     var status: ConnectionStatus {
         guard let connection else { return loadFailure == nil ? .loading : .unknown }
@@ -52,7 +61,7 @@ final class InternetState {
         await loadSnapshot(revision: revision)
         guard revision == readRevision, !Task.isCancelled else { return }
         failure = loadFailure
-        if connected, publicConnectionID == nil, loadFailure == nil, !busy { await loadPublic() }
+        if connected, publicSessionID == nil, loadFailure == nil, !busy { await loadPublic() }
     }
 
     private func loadSnapshot(revision: Int, acceptPreferences: Bool = false, refreshModem: Bool = true) async {
@@ -72,11 +81,11 @@ final class InternetState {
                 draft = value.preferences
                 draftBaseline = value.preferences
             }
-            if connection?.connectionID != value.connectionID || !value.connected {
+            if connection?.sessionID != value.sessionID || !value.connected {
                 publicRevision += 1
                 publicInfo = nil
                 publicFailure = nil
-                publicConnectionID = nil
+                publicSessionID = nil
                 publicLoading = false
             }
             connection = value
@@ -89,8 +98,8 @@ final class InternetState {
     }
 
     func loadPublic() async {
-        guard scope.available, !Task.isCancelled, !publicLoading, let key = connection?.connectionID,
-              key != publicConnectionID else { return }
+        guard scope.available, !Task.isCancelled, !publicLoading, let key = connection?.sessionID,
+              key != publicSessionID else { return }
         publicRevision += 1
         let revision = publicRevision
         publicLoading = true
@@ -98,14 +107,49 @@ final class InternetState {
         do {
             let id = scope.modemID
             let value = try await scope.read { api, token in try await api.internetPublicInfo(id, token: token) }
-            guard revision == publicRevision, connection?.connectionID == key else { return }
+            guard revision == publicRevision, connection?.sessionID == key else { return }
             publicInfo = value
-            publicConnectionID = key
+            publicSessionID = key
             publicFailure = nil
         } catch {
-            guard revision == publicRevision, scope.available, !Task.isCancelled, connection?.connectionID == key else { return }
+            guard revision == publicRevision, scope.available, !Task.isCancelled, connection?.sessionID == key else { return }
             publicFailure = .wrapping(error)
         }
+    }
+
+    func loadSpeedTest() async {
+        guard scope.available, !Task.isCancelled, !speedTestLoading, !speedTesting,
+              let iccid = scope.detail.simIdentity?.iccid, !iccid.isEmpty else { return }
+        speedTestLoading = true
+        defer { speedTestLoading = false }
+        do {
+            let id = scope.modemID
+            let status = try await scope.read { api, token in try await api.latestInternetSpeedTest(id, token: token) }
+            speedTestStatus = status.iccid == iccid ? status : nil
+            speedTestReadFailed = false
+        } catch {
+            guard scope.available, !Task.isCancelled else { return }
+            speedTestReadFailed = true
+        }
+    }
+
+    func runSpeedTest(size: InternetSpeedTestSize) async {
+        guard canRunSpeedTest, !Task.isCancelled, let iccid = scope.detail.simIdentity?.iccid else { return }
+        speedTesting = true
+        speedTestFailure = nil
+        do {
+            let id = scope.modemID
+            // A speed test is cancellable and does not mutate the connection settings.
+            let status = try await scope.read { api, token in
+                try await api.runInternetSpeedTest(id, iccid: iccid, size: size, token: token)
+            }
+            guard status.iccid == iccid, status.result != nil else { throw BackendFailure.local("api.invalidResponse") }
+            speedTestStatus = status
+        } catch {
+            if scope.available, !Task.isCancelled { speedTestFailure = .wrapping(error) }
+        }
+        speedTesting = false
+        if speedTestFailure != nil { await loadSpeedTest() }
     }
 
     func setConnected(_ enabled: Bool) async {
@@ -159,12 +203,15 @@ final class InternetState {
         connection = nil
         draft = .automatic
         draftBaseline = nil
-        publicConnectionID = nil
+        publicSessionID = nil
         publicInfo = nil
         publicFailure = nil
         loadFailure = nil
         failure = nil
         loading = false
         publicLoading = false
+        speedTestStatus = nil
+        speedTestFailure = nil
+        speedTestReadFailed = false
     }
 }

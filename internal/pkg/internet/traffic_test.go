@@ -10,8 +10,8 @@ import (
 
 func TestConnectionTrafficCountsBytesAfterBaseline(t *testing.T) {
 	meter := connectionTraffic{
-		id: "connection-1", started: time.Now(),
-		last: netlink.LinkBytes{Index: 1, RXBytes: 1000, TXBytes: 300},
+		started: time.Now(),
+		last:    netlink.LinkBytes{Index: 1, RXBytes: 1000, TXBytes: 300},
 	}
 	for _, tc := range []struct {
 		name    string
@@ -24,8 +24,8 @@ func TestConnectionTrafficCountsBytesAfterBaseline(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := meter.sample(tc.current)
-			if got == nil || got.SessionID != meter.id || got.RXBytes != tc.rx || got.TXBytes != tc.tx {
-				t.Fatalf("sample() = %+v; want %s, RX %d, TX %d", got, meter.id, tc.rx, tc.tx)
+			if got == nil || got.RXBytes != tc.rx || got.TXBytes != tc.tx {
+				t.Fatalf("sample() = %+v; want RX %d, TX %d", got, tc.rx, tc.tx)
 			}
 		})
 	}
@@ -51,11 +51,18 @@ func TestSampleTrafficDistinguishesMissingLinkFromUnavailableCounters(t *testing
 			}}
 			tracked := trackedConnection{
 				interfaceName: "wwan0",
-				traffic:       &connectionTraffic{last: netlink.LinkBytes{Index: 1}},
+				traffic:       &connectionTraffic{id: "session-1", last: netlink.LinkBytes{Index: 1}},
 			}
 			status := connector.sampleTraffic(tracked)
 			if status.Connected != tc.connected || status.Sample != nil {
 				t.Fatalf("sampleTraffic() = %+v, want connected=%t and no sample", status, tc.connected)
+			}
+			var wantSessionID string
+			if tc.connected {
+				wantSessionID = "session-1"
+			}
+			if status.SessionID != wantSessionID {
+				t.Errorf("session ID = %q, want %q", status.SessionID, wantSessionID)
 			}
 		})
 	}

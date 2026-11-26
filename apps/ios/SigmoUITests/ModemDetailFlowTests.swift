@@ -412,19 +412,38 @@ final class ModemDetailFlowTests: XCTestCase {
         let usage = app.descendants(matching: .any)["internetTrafficUsage"].firstMatch
         let heading = card.descendants(matching: .any)["internetTrafficHeading"].firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 5))
+        let egress = card.descendants(matching: .any)["internetEgressIP"].firstMatch
+        XCTAssertTrue(egress.waitForExistence(timeout: 5))
+        XCTAssertEqual(egress.value as? String, "203.0.113.1")
+        XCTAssertTrue(card.staticTexts["Fixture ISP"].exists)
+        let sampled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == '200 kb/s'"), object: upload)
+        XCTAssertEqual(XCTWaiter.wait(for: [sampled], timeout: 5), .completed)
         XCTAssertGreaterThanOrEqual(card.frame.minY, networkCard.frame.maxY)
         XCTAssertTrue(profilesCard.waitForExistence(timeout: 5))
         XCTAssertEqual(profilesCard.frame.minX, card.frame.minX, accuracy: 1)
         XCTAssertEqual(profilesCard.frame.maxX, card.frame.maxX, accuracy: 1)
         XCTAssertEqual(profilesCard.frame.minY - card.frame.maxY, card.frame.minY - networkCard.frame.maxY, accuracy: 1)
         XCTAssertEqual(heading.label, "Internet")
-        let sampled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == '200 kb/s'"), object: upload)
-        XCTAssertEqual(XCTWaiter.wait(for: [sampled], timeout: 5), .completed)
         XCTAssertTrue(["1 Mb/s", "2 Mb/s"].contains(download.value as? String ?? ""))
         XCTAssertNotEqual(usage.value as? String, "Unknown")
         XCTAssertTrue(app.staticTexts["Last 30 seconds"].exists)
         try assertSystemTint(heading, minimumCoverage: 0.01)
         screenshot(app, name: "Live Internet traffic")
+    }
+
+    func testInternetEgressIPv6FitsWithChineseAndAccessibilityText() {
+        let app = launch("detail-traffic-ipv6", chinese: true, large: true)
+        let card = app.descendants(matching: .any)["internetTrafficCard"].firstMatch
+        let egress = card.descendants(matching: .any)["internetEgressIP"].firstMatch
+        for _ in 0..<6 {
+            if egress.waitForExistence(timeout: 2), egress.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(egress.exists, app.debugDescription)
+        XCTAssertEqual(egress.label, "出口 IP")
+        XCTAssertEqual(egress.value as? String, "2001:0db8:1234:5678:90ab:cdef:1234:5678")
+        XCTAssertGreaterThanOrEqual(egress.frame.minX, card.frame.minX)
+        XCTAssertLessThanOrEqual(egress.frame.maxX, card.frame.maxX)
     }
 
     func testNetworkCardTitlesRegisteredOperatorAndKeepsSystemIconTintAcrossSIMSlots() throws {

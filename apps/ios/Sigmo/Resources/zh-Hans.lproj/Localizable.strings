@@ -767,6 +767,15 @@
 "connection.routeMetric" = "路由优先级";
 "connection.publicNetwork" = "公网信息";
 "connection.publicIP" = "公网 IP";
+"connection.egressIP" = "出口 IP";
+"connection.speedTest" = "测速";
+"connection.speedTestSize" = "测速档位";
+"connection.speedTestStart" = "开始测速";
+"connection.speedTestAgain" = "重新测速";
+"connection.speedTesting" = "正在测速…";
+"connection.speedTestLast" = "上次测试 %@";
+"connection.speedTestDataUsage" = "每次测速约使用 %lld MB 蜂窝流量。";
+"connection.speedTestReadFailed" = "无法加载测速结果。";
 "connection.country" = "国家或地区";
 "connection.organization" = "网络组织";
 "connection.proxyDetails" = "代理详情";
@@ -856,6 +865,7 @@
 "apiError.operator_code_required" = "请先选择运营商。";
 "apiError.current_internet_connection_failed" = "无法读取互联网连接。";
 "apiError.internet_public_failed" = "公网信息暂不可用，请重试。";
+"apiError.internet_speed_test_failed" = "测速失败，请重试。";
 "apiError.internet_preferences_invalid_request" = "连接选项无效。";
 "apiError.internet_preferences_update_failed" = "无法确认连接选项，请刷新状态。";
 "apiError.internet_connection_not_connected" = "此设备已断开连接，请刷新状态。";

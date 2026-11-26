@@ -731,8 +731,9 @@ func (c *Connector) recoverConnectedBearer(ctx context.Context, modem internetMo
 			previous.bearerPath == tracked.bearerPath && previous.interfaceName == tracked.interfaceName &&
 			previous.profileID == modem.profileID() && previous.traffic != nil {
 			tracked.traffic = previous.traffic
+			tracked.diagnostics = previous.diagnostics
 		} else {
-			tracked.traffic = c.startConnectionTraffic(tracked.interfaceName)
+			c.startConnectionMonitoring(&tracked)
 		}
 	}
 	return tracked, metric, ok, err

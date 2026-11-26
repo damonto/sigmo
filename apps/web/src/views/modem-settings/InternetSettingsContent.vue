@@ -87,6 +87,8 @@ const handleAction = () => {
       @update-preferences="emit('update-preferences', $event)"
     />
 
+    <slot name="speed-test" />
+
     <InternetProxyPanel v-if="shouldShowProxyInfo" :connection="props.connection" />
 
     <InternetPublicPanel v-if="props.isConnected" :public-info="props.publicInfo" />

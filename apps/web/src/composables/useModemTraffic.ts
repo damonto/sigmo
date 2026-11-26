@@ -29,6 +29,7 @@ export const useModemTraffic = (
   const api = useInternetApi()
   const visibility = useDocumentVisibility()
   const connected = ref(false)
+  const sessionId = ref<string>()
   const usedBytes = ref<number | null>(null)
   const rates = shallowRef<TrafficRates | null>(null)
   const history = shallowRef<TrafficPoint[]>([])
@@ -41,22 +42,22 @@ export const useModemTraffic = (
     previous = null
   }
 
-  const apply = ({ connected: isConnected, sample }: InternetTrafficResponse) => {
+  const apply = ({ connected: isConnected, sessionId: id, sample }: InternetTrafficResponse) => {
+    const prior = sessionId.value === id ? previous : null
+    sessionId.value = isConnected ? id : undefined
     connected.value = isConnected
-    if (!connected.value || !sample) {
+    if (!isConnected || !sample) {
       clearSamples()
       return
     }
 
-    const prior = previous
     const elapsed = prior ? sample.elapsedMilliseconds - prior.elapsedMilliseconds : 0
-    const sameSession = prior && sample.sessionId === prior.sessionId
-    if (sameSession && elapsed <= 0) return
+    if (prior && elapsed <= 0) return
 
     usedBytes.value = sample.rxBytes + sample.txBytes
     previous = sample
     if (
-      !sameSession ||
+      !prior ||
       elapsed > TRAFFIC_WINDOW_MS ||
       sample.rxBytes < prior.rxBytes ||
       sample.txBytes < prior.txBytes
@@ -90,6 +91,7 @@ export const useModemTraffic = (
     [modemId, simId, enabled, visibility],
     ([id, , canSample, state], _, onCleanup) => {
       clearSamples()
+      sessionId.value = undefined
       connected.value = false
       if (!id || !canSample || state === 'hidden') return
 
@@ -113,6 +115,7 @@ export const useModemTraffic = (
           rates.value = null
           if (performance.now() - lastResponseAt >= STATUS_TIMEOUT_MS) {
             connected.value = false
+            sessionId.value = undefined
             clearSamples()
           }
         } finally {
@@ -134,5 +137,5 @@ export const useModemTraffic = (
     { immediate: true },
   )
 
-  return { connected, usedBytes, rates, history }
+  return { connected, sessionId, usedBytes, rates, history }
 }

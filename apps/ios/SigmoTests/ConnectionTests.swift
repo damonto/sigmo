@@ -494,6 +494,25 @@ final class ConnectionTests: XCTestCase {
         XCTAssertEqual(detail.modem?.networkSelectionName, "23410")
     }
 
+    func testOpeningDisconnectedInternetDoesNotRequireAnActiveSession() async throws {
+        var fixture = ConnectionFixture()
+        fixture.internet.connected = false
+        let server = DetailFixtureServer(initialConnection: fixture)
+        let detail = try await make(server)
+        let state = InternetState(detail: detail, profileID: profileID)
+
+        await state.reload()
+
+        XCTAssertEqual(state.connection?.status, "disconnected")
+        XCTAssertNil(state.connection?.sessionID)
+        XCTAssertNil(state.failure)
+        XCTAssertTrue(state.canChange)
+        XCTAssertTrue(state.canEditAPN)
+        XCTAssertFalse(state.canRunSpeedTest)
+        let requests = await server.allRequests()
+        XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/internet-connections/public") == true })
+    }
+
     func testInternetDraftSurvivesReadsAndSubmitsCompletePreferences() async throws {
         let server = DetailFixtureServer()
         var fixture = ConnectionFixture()
@@ -645,6 +664,36 @@ final class ConnectionTests: XCTestCase {
             XCTAssertNotNil(state.publicInfo)
             XCTAssertNil(state.failure)
         }
+    }
+
+    func testInternetSpeedTestSendsSelectedSize() async throws {
+        let server = DetailFixtureServer()
+        let detail = try await make(server)
+        let state = InternetState(detail: detail, profileID: profileID)
+        await state.load()
+        await state.loadSpeedTest()
+        XCTAssertTrue(state.canRunSpeedTest)
+        guard state.canRunSpeedTest else { return }
+
+        let path = "/internet-connections/speed-tests"
+        await server.holdNext(path)
+        let test = Task { await state.runSpeedTest(size: .mb50) }
+        await server.waitForHeldRequest()
+        XCTAssertTrue(state.speedTesting)
+        XCTAssertFalse(state.canRunSpeedTest)
+        await state.runSpeedTest(size: .mb100)
+        await server.release()
+        await test.value
+
+        let requests = await writes(server, suffix: path)
+        XCTAssertEqual(requests.count, 1)
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.timeoutInterval, 210)
+        let body = try JSONDecoder().decode(InternetSpeedTestRequest.self, from: XCTUnwrap(request.httpBody))
+        XCTAssertEqual(body.sizeMB, 50)
+        XCTAssertEqual(body.iccid, detail.simIdentity?.iccid)
+        XCTAssertFalse(state.speedTesting)
+        XCTAssertNotNil(state.speedTest)
     }
 
     func testInternetMutationReconcilesWhileAnOldReadIsPending() async throws {

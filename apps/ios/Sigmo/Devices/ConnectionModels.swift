@@ -114,9 +114,9 @@ struct InternetProxy: Codable, Sendable, Equatable {
 struct DetailInternet: Decodable, Sendable, Equatable {
     let status: String
     let preferences: InternetPreferences
+    let sessionID: String?
     let proxy: InternetProxy?
     let interfaceName: String?
-    let bearer: UInt64?
     let ipv4Addresses: [String]
     let ipv6Addresses: [String]
     let dns: [String]
@@ -127,23 +127,27 @@ struct DetailInternet: Decodable, Sendable, Equatable {
 
     var connected: Bool { status == "connected" }
     var knownStatus: Bool { ["connected", "disconnected"].contains(status) }
-    var connectionID: String? {
-        guard connected else { return nil }
-        if let bearer, bearer != 0 { return "bearer:\(bearer)" }
-        return interfaceName.flatMap { $0.isEmpty ? nil : "interface:" + $0 }
-    }
 
     private enum CodingKeys: String, CodingKey {
-        case status, proxy, interfaceName, bearer, ipv4Addresses, ipv6Addresses, dns
+        case status, proxy, interfaceName, ipv4Addresses, ipv6Addresses, dns
         case durationSeconds, txBytes, rxBytes, routeMetric
+        case sessionID = "sessionId"
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         status = try values.decode(String.self, forKey: .status)
+        if status == "connected" {
+            let session = try values.decode(String.self, forKey: .sessionID)
+            guard !session.isEmpty else {
+                throw DecodingError.dataCorruptedError(forKey: .sessionID, in: values, debugDescription: "Connected modem has no Internet session ID.")
+            }
+            sessionID = session
+        } else {
+            sessionID = nil
+        }
         preferences = try InternetPreferences(from: decoder)
         proxy = try values.decodeIfPresent(InternetProxy.self, forKey: .proxy)
         interfaceName = try values.decodeIfPresent(String.self, forKey: .interfaceName)
-        bearer = try values.decodeIfPresent(UInt64.self, forKey: .bearer)
         ipv4Addresses = try values.decodeIfPresent([String].self, forKey: .ipv4Addresses) ?? []
         ipv6Addresses = try values.decodeIfPresent([String].self, forKey: .ipv6Addresses) ?? []
         dns = try values.decodeIfPresent([String].self, forKey: .dns) ?? []
@@ -158,6 +162,35 @@ struct InternetPublicInfo: Codable, Sendable, Equatable {
     let ip: String?
     let country: String?
     let organization: String?
+    let isp: String?
+}
+
+enum InternetSpeedTestSize: Int, CaseIterable, Sendable {
+    case mb10 = 10, mb25 = 25, mb50 = 50, mb100 = 100
+}
+
+struct InternetSpeedTestRequest: Codable {
+    let iccid: String
+    let sizeMB: Int?
+}
+
+struct InternetSpeedTestResult: Codable, Sendable, Equatable {
+    let downloadBps: Int64
+    let uploadBps: Int64
+    let testedAt: Date
+}
+
+struct InternetSpeedTestStatus: Codable, Sendable {
+    let iccid: String
+    let result: InternetSpeedTestResult?
+
+    private enum CodingKeys: String, CodingKey { case iccid, result }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(iccid, forKey: .iccid)
+        try values.encode(result, forKey: .result)
+    }
 }
 
 struct WiFiDirectUnderlay: Codable, Sendable, Equatable, Hashable {

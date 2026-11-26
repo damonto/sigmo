@@ -427,6 +427,9 @@ func TestQMAPProxyLifecycle(t *testing.T) {
 		traffic.Sample.RXBytes != 128 || traffic.Sample.TXBytes != 64 {
 		t.Fatalf("Traffic() = %+v (%+v), %v; want 128 RX and 64 TX bytes since connect", traffic, traffic.Sample, err)
 	}
+	if traffic.SessionID == "" || traffic.SessionID != connection.SessionID {
+		t.Fatalf("traffic session = %q, connection session = %q", traffic.SessionID, connection.SessionID)
+	}
 
 	if err := connector.disconnectQMAPLocked(ctx, modem); err != nil {
 		t.Fatalf("disconnectQMAPLocked() error = %v", err)

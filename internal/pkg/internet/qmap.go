@@ -355,7 +355,7 @@ func (c *Connector) connectQMAPSessionLocked(ctx context.Context, modem *mmodem.
 	}
 	tracked.modemGeneration = modem.Generation()
 	tracked.profileID = profileID
-	tracked.traffic = c.startConnectionTraffic(tracked.interfaceName)
+	c.startConnectionMonitoring(&tracked)
 	connection.tracked = tracked
 	if prefs.DefaultRoute {
 		connection.tracked, err = c.updateTrackedDefaultRoute(ctx, modem.EquipmentIdentifier, tracked, true)
@@ -400,6 +400,9 @@ func (c *Connector) connectQMAPSessionLocked(ctx context.Context, modem *mmodem.
 		}
 	}
 	c.mu.Lock()
+	if previous := c.qmapConnections[modem.EquipmentIdentifier]; previous != nil {
+		previous.tracked.diagnostics.retire()
+	}
 	c.qmapConnections[modem.EquipmentIdentifier] = connection
 	if mode != connectTemporary {
 		if c.preferenceProfiles == nil {
@@ -424,6 +427,7 @@ func (c *Connector) disconnectQMAPLocked(ctx context.Context, modem *mmodem.Mode
 	if connection == nil {
 		return nil
 	}
+	connection.tracked.diagnostics.retire()
 	var proxyErr error
 	if connection.tracked.prefs.ProxyEnabled {
 		proxyErr = c.cleanupProxy(ctx, modem.EquipmentIdentifier, connection.tracked.interfaceName)
@@ -498,6 +502,7 @@ func (c *qmapConnection) cleanup(ctx context.Context, connector *Connector) erro
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), connectionCleanupTimeout)
 	defer cancel()
 	tracked := c.tracked
+	tracked.diagnostics.retire()
 	c.tracked = trackedConnection{}
 	if strings.TrimSpace(tracked.interfaceName) == "" {
 		return nil
@@ -516,6 +521,7 @@ func (c *qmapConnection) response() *Connection {
 	}
 	response := &Connection{
 		Status: StatusConnected, APN: prefs.APN, IPType: ipType,
+		SessionID:    c.tracked.sessionID(),
 		DefaultRoute: prefs.DefaultRoute, ProxyEnabled: prefs.ProxyEnabled,
 		AlwaysOn: prefs.AlwaysOn, DNS: slices.Clone(c.tracked.dns),
 		InterfaceName: c.tracked.interfaceName, RouteMetric: c.tracked.routeMetric,

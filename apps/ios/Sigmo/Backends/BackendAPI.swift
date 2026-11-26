@@ -17,12 +17,13 @@ final class BackendRedirects: NSObject, URLSessionTaskDelegate, Sendable {
 }
 
 enum BackendRequestTimeout: Sendable {
-    case traffic, standard, hardware
+    case traffic, standard, speedTest, hardware
 
     var interval: TimeInterval {
         switch self {
         case .traffic: 3
         case .standard: 30
+        case .speedTest: 210
         // Modem and eSIM operations can take five minutes before returning data.
         case .hardware: 10 * 60
         }

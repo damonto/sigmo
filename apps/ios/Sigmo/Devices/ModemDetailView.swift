@@ -80,6 +80,7 @@ private struct ModemDetailScreen: View {
     @State private var networkCardHeight: CGFloat = 0
     @State private var networkCardScrolled = false
     @State private var internetTraffic = InternetTrafficState()
+    @State private var internetEgress: (target: InternetEgressTarget, info: InternetPublicInfo)?
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -142,6 +143,17 @@ private struct ModemDetailScreen: View {
         guard tab == .overview, scenePhase == .active, session.canAccessDevices,
               let modem = state.modem, modem.state != "locked", !modem.airplaneMode else { return nil }
         return state.simTarget
+    }
+
+    private struct InternetEgressTarget: Equatable {
+        let sim: ModemSIMTarget
+        let sessionID: String
+    }
+
+    private var internetEgressTarget: InternetEgressTarget? {
+        guard let target = trafficTarget, internetTraffic.connectedTarget == target,
+              let sessionID = internetTraffic.sessionID else { return nil }
+        return .init(sim: target, sessionID: sessionID)
     }
 
     private var tabs: some View {
@@ -313,6 +325,8 @@ private struct ModemDetailScreen: View {
     private var overviewList: some View {
         let target = trafficTarget
         let showsTraffic = target != nil && internetTraffic.connectedTarget == target
+        let egressTarget = internetEgressTarget
+        let publicInfo = internetEgress?.target == egressTarget ? internetEgress?.info : nil
         return List {
             if let modem = state.modem {
                 if state.needsSIMUnlock {
@@ -328,7 +342,7 @@ private struct ModemDetailScreen: View {
                                 .modifier(ModemOverviewCardRow())
                         }
                         if showsTraffic {
-                            InternetTrafficCard(traffic: internetTraffic, target: target, accent: .accentColor)
+                            InternetTrafficCard(traffic: internetTraffic, target: target, accent: .accentColor, publicInfo: publicInfo)
                                 .modifier(ModemOverviewCardSurface())
                                 .modifier(ModemOverviewCardRow())
                         }
@@ -386,6 +400,16 @@ private struct ModemDetailScreen: View {
         .refreshable { await reload() }
         .task(id: target) {
             if let target { await internetTraffic.observe(state, target: target) }
+        }
+        .task(id: egressTarget) {
+            internetEgress = nil
+            guard let egressTarget else { return }
+            let modemID = state.modemID
+            let info = try? await session.protectedRequest { api, token in
+                try await api.internetPublicInfo(modemID, token: token)
+            }
+            guard !Task.isCancelled, internetEgressTarget == egressTarget, let info else { return }
+            internetEgress = (egressTarget, info)
         }
         .detailErrorAlert($presentedFailure)
         .foregroundTask(id: refreshIdentity) {

@@ -193,6 +193,39 @@ final class ConnectionFlowTests: XCTestCase {
         capture(app, name: "Internet proxy details")
     }
 
+    func testInternetSpeedTestRestoresResultWhileDisconnected() {
+        let app = launch()
+        tap(app.buttons["profileInternet"], in: app)
+        let button = app.buttons["internetSpeedTestButton"]
+        let size = app.descendants(matching: .any)["internetSpeedTestSize"].firstMatch
+        let defaultUsage = app.staticTexts["Uses about 10 MB of mobile data per test."]
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: button)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
+        XCTAssertEqual(button.label, "Start Test")
+        XCTAssertTrue(defaultUsage.exists)
+        XCTAssertTrue(size.waitForExistence(timeout: 5), app.debugDescription)
+        size.tap()
+        let largerSize = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "50 MB")).firstMatch
+        XCTAssertTrue(largerSize.waitForExistence(timeout: 5), app.debugDescription)
+        largerSize.tap()
+        XCTAssertTrue(app.staticTexts["Uses about 50 MB of mobile data per test."].exists)
+        tap(button, in: app)
+        XCTAssertTrue(app.staticTexts["92.4 Mbps"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["15.2 Mbps"].exists)
+        XCTAssertEqual(button.label, "Test Again")
+        toggle("internetConnected", in: app)
+        expectToggle("internetConnected", value: "0", in: app)
+        back(app)
+        tap(app.buttons["profileInternet"], in: app)
+        expectToggle("internetConnected", value: "0", in: app)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["92.4 Mbps"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["15.2 Mbps"].exists)
+        XCTAssertTrue(defaultUsage.exists)
+        XCTAssertFalse(button.isEnabled)
+    }
+
     func testConnectedPreferenceFailureKeepsConfirmedSwitch() {
         let app = launch("detail-connection-write-error")
         tap(app.buttons["profileInternet"], in: app)

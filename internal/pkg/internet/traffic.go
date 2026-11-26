@@ -13,12 +13,12 @@ import (
 // TrafficStatus reports whether a managed Internet connection is active and can be sampled.
 type TrafficStatus struct {
 	Connected bool
+	SessionID string
 	Sample    *TrafficSample
 }
 
 // TrafficSample counts interface bytes since Sigmo established or recovered the connection.
 type TrafficSample struct {
-	SessionID           string
 	ElapsedMilliseconds int64
 	RXBytes             uint64
 	TXBytes             uint64
@@ -46,6 +46,13 @@ func (c *Connector) startConnectionTraffic(name string) *connectionTraffic {
 	return &connectionTraffic{id: rand.Text(), started: time.Now(), last: baseline}
 }
 
+func (tracked trackedConnection) sessionID() string {
+	if tracked.traffic == nil {
+		return ""
+	}
+	return tracked.traffic.id
+}
+
 func (meter *connectionTraffic) sample(current netlink.LinkBytes) *TrafficSample {
 	if meter.last.Index != 0 && current.Index != meter.last.Index {
 		return nil
@@ -58,8 +65,8 @@ func (meter *connectionTraffic) sample(current netlink.LinkBytes) *TrafficSample
 	}
 	meter.last = current
 	return &TrafficSample{
-		SessionID: meter.id, ElapsedMilliseconds: time.Since(meter.started).Milliseconds(),
-		RXBytes: meter.rx, TXBytes: meter.tx,
+		ElapsedMilliseconds: time.Since(meter.started).Milliseconds(),
+		RXBytes:             meter.rx, TXBytes: meter.tx,
 	}
 }
 
@@ -117,10 +124,10 @@ func (c *Connector) trafficLocked(ctx context.Context, modem internetModem) (Tra
 }
 
 func (c *Connector) sampleTraffic(tracked trackedConnection) TrafficStatus {
-	result := TrafficStatus{Connected: true}
 	if tracked.traffic == nil {
-		return result
+		return TrafficStatus{}
 	}
+	result := TrafficStatus{Connected: true, SessionID: tracked.sessionID()}
 	current, err := c.linkBytes(tracked.interfaceName)
 	if errors.Is(err, netlink.ErrInterfaceNotFound) {
 		return TrafficStatus{}

@@ -5,6 +5,7 @@ struct InternetTrafficCard: View {
     let target: ModemSIMTarget?
     let accent: Color
     var status: ConnectionStatus = .connected
+    var publicInfo: InternetPublicInfo?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
 
@@ -39,6 +40,9 @@ struct InternetTrafficCard: View {
                 } else {
                     usage(history.usedBytes)
                 }
+                if let publicInfo, let ip = publicInfo.ip?.trimmingCharacters(in: .whitespacesAndNewlines), !ip.isEmpty {
+                    egress(publicInfo, ip: ip)
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -58,6 +62,48 @@ struct InternetTrafficCard: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("internetTrafficCard")
+    }
+
+    private func egress(_ info: InternetPublicInfo, ip: String) -> some View {
+        let provider = info.isp?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = provider?.isEmpty == false ? provider : info.organization?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = info.country?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        let region = code.utf8.count == 2 && code.utf8.allSatisfy { (65...90).contains($0) } ? code : nil
+        let hasProvider = name?.isEmpty == false || region != nil
+        let providerLabel = HStack(spacing: 6) {
+            if let region {
+                RegionFlag(regionCode: region, size: 16, background: .clear)
+            }
+            if let name, !name.isEmpty {
+                Text(verbatim: name).fontWeight(.medium)
+            }
+        }
+        let address = Text(verbatim: ip)
+            .monospaced()
+            .accessibilityLabel(Text("connection.egressIP"))
+            .accessibilityValue(ip)
+            .accessibilityIdentifier("internetEgressIP")
+        let stacked = VStack(alignment: .leading, spacing: 4) {
+            if hasProvider { providerLabel }
+            address.fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        return VStack(alignment: .leading, spacing: 7) {
+            Divider().accessibilityHidden(true)
+            if dynamicTypeSize.isAccessibilitySize {
+                stacked
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        if hasProvider { providerLabel.fixedSize(horizontal: true, vertical: false) }
+                        Spacer(minLength: 0)
+                        address.fixedSize(horizontal: true, vertical: false)
+                    }
+                    stacked
+                }
+            }
+        }
+        .font(.caption)
     }
 
     private var title: some View {

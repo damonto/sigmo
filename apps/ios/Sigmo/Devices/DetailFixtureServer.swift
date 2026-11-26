@@ -361,7 +361,8 @@ actor DetailFixtureServer {
             if let result = try settings.respond(request, resource: resource) { return result }
             var connection = currentConnections(modemID)
             defer { connections[modemID] = connection }
-            if let result = try connection.respond(request, resource: resource, modemID: modemID, airplane: settings.airplaneEnabled) { return result }
+            if let result = try connection.respond(request, resource: resource, modemID: modemID,
+                                                   iccid: modem(modemID).sim.identifier, airplane: settings.airplaneEnabled) { return result }
         }
         if path.hasSuffix("/secure-elements") {
             return try reply(scenario == .singleHardware ? SecureElements(ses: Array(Self.elements.ses.prefix(1))) : Self.elements)

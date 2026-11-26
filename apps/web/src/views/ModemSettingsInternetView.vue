@@ -7,7 +7,9 @@ import ModemSettingsHeader from '@/components/modem/settings/ModemSettingsHeader
 import ModemSettingsShell from '@/components/modem/settings/ModemSettingsShell.vue'
 import { useFeedbackBanner } from '@/composables/useFeedbackBanner'
 import { useModemInternet } from '@/composables/useModemInternet'
+import { useModemSpeedTest } from '@/composables/useModemSpeedTest'
 import InternetSettingsContent from '@/views/modem-settings/InternetSettingsContent.vue'
+import InternetSpeedTestPanel from '@/views/modem-settings/InternetSpeedTestPanel.vue'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -40,6 +42,10 @@ const {
   onSuccess: showFeedback,
   onError: showError,
 })
+const { result, running, failure, readFailed, canRun, run } = useModemSpeedTest(
+  modemId,
+  isInternetConnected,
+)
 </script>
 
 <template>
@@ -70,6 +76,18 @@ const {
       @connect="handleInternetConnect"
       @disconnect="handleInternetDisconnect"
       @update-preferences="handleInternetPreferencesUpdate"
-    />
+    >
+      <template #speed-test>
+        <InternetSpeedTestPanel
+          :key="modemId"
+          :result="result"
+          :running="running"
+          :failure="failure"
+          :read-failed="readFailed"
+          :can-run="canRun && !isInternetDisconnecting && !isInternetPreferencesUpdating"
+          @test="run"
+        />
+      </template>
+    </InternetSettingsContent>
   </ModemSettingsShell>
 </template>

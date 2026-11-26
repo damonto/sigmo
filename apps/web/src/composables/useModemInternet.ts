@@ -1,11 +1,11 @@
-import { computed, onUnmounted, ref, watch, type ComputedRef } from 'vue'
+import { computed, onScopeDispose, ref, watch, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useInternetApi } from '@/apis/internet'
+import { useModemPublicIP } from '@/composables/useModemPublicIP'
 import type {
   InternetConnectionPreferencesPayload,
   InternetConnectionResponse,
-  InternetPublicResponse,
 } from '@/types/internet'
 
 type Options = {
@@ -17,7 +17,6 @@ type Options = {
 
 type FetchConnectionOptions = {
   silent?: boolean
-  includePublic?: boolean
 }
 
 const pollIntervalMs = 5000
@@ -30,7 +29,6 @@ export const useModemInternet = ({ modemId, enabled, onSuccess, onError }: Optio
   const isInternetEnabled = computed(() => enabled?.value ?? true)
 
   const internetConnection = ref<InternetConnectionResponse | null>(null)
-  const internetPublicInfo = ref<InternetPublicResponse | null>(null)
   const internetAPN = ref('')
   const internetIPType = ref(defaultIPType)
   const internetAPNUsername = ref('')
@@ -45,7 +43,6 @@ export const useModemInternet = ({ modemId, enabled, onSuccess, onError }: Optio
   const isInternetPreferencesUpdating = ref(false)
   const preferenceRequestEpoch = ref(0)
   const pollTimer = ref<number>()
-  const publicConnectionKey = ref('')
 
   const isInternetConnected = computed(() => internetConnection.value?.status === 'connected')
   const canConnectInternet = computed(() => {
@@ -74,8 +71,6 @@ export const useModemInternet = ({ modemId, enabled, onSuccess, onError }: Optio
   const resetInternet = () => {
     stopPolling()
     internetConnection.value = null
-    internetPublicInfo.value = null
-    publicConnectionKey.value = ''
     internetAPN.value = ''
     internetIPType.value = defaultIPType
     internetAPNUsername.value = ''
@@ -86,20 +81,10 @@ export const useModemInternet = ({ modemId, enabled, onSuccess, onError }: Optio
     internetAlwaysOn.value = false
   }
 
-  const connectionKey = (connection: InternetConnectionResponse | null) => {
-    return connection?.bearer ? String(connection.bearer) : connection?.interfaceName || ''
-  }
-
-  const shouldFetchPublic = (connection: InternetConnectionResponse | null) => {
-    const key = connectionKey(connection)
-    return connection?.status === 'connected' && key !== '' && publicConnectionKey.value !== key
-  }
-
   const applyConnection = (
     connection: InternetConnectionResponse | null,
     preservePreferences = false,
   ) => {
-    const key = connectionKey(connection)
     internetConnection.value = connection
     if (!preservePreferences) {
       internetAPN.value = connection?.apn ?? ''
@@ -110,29 +95,6 @@ export const useModemInternet = ({ modemId, enabled, onSuccess, onError }: Optio
       internetDefaultRoute.value = connection?.defaultRoute ?? false
       internetProxyEnabled.value = connection?.proxyEnabled ?? false
       internetAlwaysOn.value = connection?.alwaysOn ?? false
-    }
-    if (connection?.status !== 'connected' || publicConnectionKey.value !== key) {
-      internetPublicInfo.value = null
-      publicConnectionKey.value = ''
-    }
-  }
-
-  const fetchInternetPublic = async (connection: InternetConnectionResponse | null) => {
-    const targetId = modemId.value
-    const targetKey = connectionKey(connection)
-    if (!targetId || connection?.status !== 'connected' || !targetKey) {
-      internetPublicInfo.value = null
-      publicConnectionKey.value = ''
-      return
-    }
-    try {
-      const { data } = await internetApi.getPublic(targetId)
-      if (modemId.value === targetId && connectionKey(internetConnection.value) === targetKey) {
-        internetPublicInfo.value = data.value ?? null
-        publicConnectionKey.value = targetKey
-      }
-    } catch (err) {
-      console.error('[useModemInternet] Failed to fetch public network:', err)
     }
   }
 
@@ -153,9 +115,6 @@ export const useModemInternet = ({ modemId, enabled, onSuccess, onError }: Optio
       if (requestEpoch !== preferenceRequestEpoch.value) return
       const connection = data.value ?? null
       applyConnection(connection, preservePreferences)
-      if (options?.includePublic && shouldFetchPublic(connection)) {
-        void fetchInternetPublic(connection)
-      }
     } catch (err) {
       console.error('[useModemInternet] Failed to fetch connection:', err)
     } finally {
@@ -183,9 +142,6 @@ export const useModemInternet = ({ modemId, enabled, onSuccess, onError }: Optio
       })
       const connection = data.value ?? null
       applyConnection(connection)
-      if (connection?.status === 'connected') {
-        void fetchInternetPublic(connection)
-      }
       onSuccess?.(t('modemDetail.settings.internetConnectSuccess'))
     } catch (err) {
       console.error('[useModemInternet] Failed to connect:', err)
@@ -253,7 +209,7 @@ export const useModemInternet = ({ modemId, enabled, onSuccess, onError }: Optio
       if (!id || !canUseInternet) {
         return
       }
-      await fetchInternetConnection({ includePublic: true })
+      await fetchInternetConnection()
     },
     { immediate: true },
   )
@@ -270,7 +226,16 @@ export const useModemInternet = ({ modemId, enabled, onSuccess, onError }: Optio
     { immediate: true },
   )
 
-  onUnmounted(stopPolling)
+  onScopeDispose(stopPolling)
+
+  const internetPublicInfo = useModemPublicIP(
+    modemId,
+    computed(() => {
+      const connection = internetConnection.value
+      if (!isInternetEnabled.value || connection?.status !== 'connected') return ''
+      return connection.sessionId
+    }),
+  )
 
   return {
     internetConnection,

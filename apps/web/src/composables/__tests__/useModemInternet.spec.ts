@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, effectScope, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useModemInternet } from '@/composables/useModemInternet'
@@ -24,6 +24,7 @@ const connected = (
   overrides: Partial<InternetConnectionResponse> = {},
 ): InternetConnectionResponse => ({
   status: 'connected',
+  sessionId: 'session-1',
   apn: 'internet',
   ipType: 'ipv4v6',
   apnUsername: '',
@@ -53,14 +54,35 @@ describe('useModemInternet', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.getCurrentConnection.mockResolvedValue({ data: { value: connected() } })
-    api.getPublic.mockResolvedValue({ data: { value: {} } })
+    api.getPublic.mockResolvedValue({})
     api.disconnect.mockResolvedValue({ data: { value: undefined } })
+  })
+
+  it('refreshes the public IP when the session changes on the same interface', async () => {
+    vi.useFakeTimers()
+    const scope = effectScope()
+    try {
+      api.getCurrentConnection
+        .mockResolvedValueOnce({ data: { value: connected({ bearer: 0, sessionId: 'before' }) } })
+        .mockResolvedValue({ data: { value: connected({ bearer: 0, sessionId: 'after' }) } })
+      api.getPublic
+        .mockResolvedValueOnce({ ip: '203.0.113.1' })
+        .mockResolvedValue({ ip: '203.0.113.2' })
+      const internet = scope.run(() => useModemInternet({ modemId: computed(() => 'modem-1') }))
+
+      await vi.advanceTimersByTimeAsync(0)
+      expect(internet?.internetPublicInfo.value?.ip).toBe('203.0.113.1')
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(internet?.internetPublicInfo.value?.ip).toBe('203.0.113.2')
+      expect(api.getPublic).toHaveBeenCalledTimes(2)
+    } finally {
+      scope.stop()
+    }
   })
 
   it('optimistically saves connected preferences and applies the response', async () => {
     let resolveUpdate:
-      | ((value: { data: { value: InternetConnectionResponse } }) => void)
-      | undefined
+      ((value: { data: { value: InternetConnectionResponse } }) => void) | undefined
     api.updatePreferences.mockReturnValue(
       new Promise((resolve) => {
         resolveUpdate = resolve

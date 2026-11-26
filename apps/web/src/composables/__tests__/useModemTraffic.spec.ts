@@ -11,7 +11,8 @@ vi.mock('@/apis/internet', () => ({ useInternetApi: () => ({ getTraffic }) }))
 
 const response = (elapsedMilliseconds: number, rxBytes: number): InternetTrafficResponse => ({
   connected: true,
-  sample: { sessionId: 'session-1', elapsedMilliseconds, rxBytes, txBytes: 0 },
+  sessionId: 'session-1',
+  sample: { elapsedMilliseconds, rxBytes, txBytes: 0 },
 })
 
 describe('useModemTraffic', () => {
@@ -71,5 +72,35 @@ describe('useModemTraffic', () => {
   it('rejects invalid counters at the API boundary', () => {
     expect(() => parseInternetTrafficResponse(response(1000, -1))).toThrow()
     expect(() => parseInternetTrafficResponse(response(1000, Number.NaN))).toThrow()
+    expect(() => parseInternetTrafficResponse({ connected: true, sample: null })).toThrow()
+  })
+
+  it('updates the connection identity even when the new counters are unavailable', async () => {
+    vi.useFakeTimers()
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    const scope = effectScope()
+    try {
+      getTraffic
+        .mockReset()
+        .mockResolvedValueOnce(response(0, 1000))
+        .mockResolvedValue({ connected: true, sessionId: 'session-2', sample: null })
+      const traffic = scope.run(() =>
+        useModemTraffic(
+          computed(() => 'modem-1'),
+          computed(() => 'sim-1'),
+          computed(() => true),
+        ),
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      expect(traffic?.sessionId.value).toBe('session-1')
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(traffic?.connected.value).toBe(true)
+      expect(traffic?.sessionId.value).toBe('session-2')
+      expect(traffic?.usedBytes.value).toBeNull()
+    } finally {
+      scope.stop()
+      visibility.mockRestore()
+      vi.useRealTimers()
+    }
   })
 })

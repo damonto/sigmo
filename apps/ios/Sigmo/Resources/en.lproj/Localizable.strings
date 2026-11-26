@@ -767,6 +767,15 @@
 "connection.routeMetric" = "Route Metric";
 "connection.publicNetwork" = "Public Network";
 "connection.publicIP" = "Public IP";
+"connection.egressIP" = "Egress IP";
+"connection.speedTest" = "Speed Test";
+"connection.speedTestSize" = "Test Size";
+"connection.speedTestStart" = "Start Test";
+"connection.speedTestAgain" = "Test Again";
+"connection.speedTesting" = "Testing…";
+"connection.speedTestLast" = "Last tested %@";
+"connection.speedTestDataUsage" = "Uses about %lld MB of mobile data per test.";
+"connection.speedTestReadFailed" = "Could not load speed test results.";
 "connection.country" = "Country or Region";
 "connection.organization" = "Organization";
 "connection.proxyDetails" = "Proxy Details";
@@ -856,6 +865,7 @@
 "apiError.operator_code_required" = "Choose a network first.";
 "apiError.current_internet_connection_failed" = "Could not read the Internet connection.";
 "apiError.internet_public_failed" = "Public network information is unavailable. Try again.";
+"apiError.internet_speed_test_failed" = "Speed test failed. Try again.";
 "apiError.internet_preferences_invalid_request" = "The connection options are invalid.";
 "apiError.internet_preferences_update_failed" = "The connection options could not be confirmed. Refresh their status.";
 "apiError.internet_connection_not_connected" = "This device is no longer connected. Refresh its status.";

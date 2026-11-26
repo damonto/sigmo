@@ -8,6 +8,7 @@ import InternetConnectionPanel from '@/views/modem-settings/InternetConnectionPa
 
 const connection: InternetConnectionResponse = {
   status: 'connected',
+  sessionId: 'session-1',
   apn: 'internet',
   ipType: 'ipv4v6',
   apnUsername: '',

@@ -99,6 +99,7 @@
   "internet_proxy_invalid_config": "Internet Proxy Invalid Config",
   "internet_proxy_start_failed": "Internet Proxy Start Failed",
   "internet_public_failed": "Internet Public Failed",
+  "internet_speed_test_failed": "Internet Speed Test Failed",
   "invalid_action": "Invalid Action",
   "invalid_call_client": "Invalid Call Client",
   "invalid_call_hold": "Invalid Call Hold",

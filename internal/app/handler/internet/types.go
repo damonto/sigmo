@@ -1,5 +1,13 @@
 package internet
 
+import (
+	"encoding/json"
+	"errors"
+	"time"
+
+	internetcore "github.com/damonto/sigmo/internal/pkg/internet"
+)
+
 type ConnectRequest struct {
 	APN          string `json:"apn" validate:"omitempty,max=100"`
 	IPType       string `json:"ipType" validate:"omitempty,max=20"`
@@ -19,6 +27,7 @@ type UpdatePreferencesRequest struct {
 
 type ConnectionResponse struct {
 	Status          string   `json:"status" jsonschema:"connection state: connected or disconnected"`
+	SessionID       string   `json:"sessionId" jsonschema:"identifier of the tracked Internet connection session; empty while disconnected"`
 	APN             string   `json:"apn" jsonschema:"access point name used by the mobile data connection"`
 	IPType          string   `json:"ipType" jsonschema:"requested bearer IP family, such as ipv4, ipv6, or ipv4v6"`
 	APNUsername     string   `json:"apnUsername" jsonschema:"username configured for APN authentication; empty when unused"`
@@ -42,12 +51,12 @@ type ConnectionResponse struct {
 // TrafficResponse contains the connection state and an optional fresh sample.
 type TrafficResponse struct {
 	Connected bool           `json:"connected"`
+	SessionID string         `json:"sessionId"`
 	Sample    *TrafficSample `json:"sample"`
 }
 
 // TrafficSample contains session byte totals and their monotonic sample time.
 type TrafficSample struct {
-	SessionID           string `json:"sessionId"`
 	ElapsedMilliseconds int64  `json:"elapsedMilliseconds"`
 	RXBytes             uint64 `json:"rxBytes"`
 	TXBytes             uint64 `json:"txBytes"`
@@ -57,6 +66,40 @@ type PublicResponse struct {
 	IP           string `json:"ip" jsonschema:"public IP address observed for this modem connection"`
 	Country      string `json:"country" jsonschema:"country associated with the public IP; empty when unavailable"`
 	Organization string `json:"organization" jsonschema:"network organization associated with the public IP; empty when unavailable"`
+	ISP          string `json:"isp,omitempty" jsonschema:"internet service provider associated with the public IP"`
+}
+
+// SpeedTestRequest identifies the target SIM and optionally selects the payload size.
+type SpeedTestRequest struct {
+	ICCID  string          `json:"iccid" validate:"required,max=64"`
+	SizeMB json.RawMessage `json:"sizeMB,omitempty"`
+}
+
+func (req SpeedTestRequest) size() (internetcore.SpeedTestSize, error) {
+	// Decode the size separately so a malformed size gets its own request error.
+	var sizeMB *internetcore.SpeedTestSize
+	if len(req.SizeMB) > 0 {
+		if err := json.Unmarshal(req.SizeMB, &sizeMB); err != nil {
+			return 0, errors.New("speed test size must be an integer")
+		}
+	}
+	if sizeMB == nil {
+		return internetcore.DefaultSpeedTestSize, nil
+	}
+	return *sizeMB, sizeMB.Validate()
+}
+
+// SpeedTestResponse contains the latest successful test for the current SIM.
+type SpeedTestResponse struct {
+	ICCID  string           `json:"iccid"`
+	Result *SpeedTestResult `json:"result"`
+}
+
+// SpeedTestResult contains transfer rates in bits per second and the UTC completion time.
+type SpeedTestResult struct {
+	DownloadBPS int64     `json:"downloadBps"`
+	UploadBPS   int64     `json:"uploadBps"`
+	TestedAt    time.Time `json:"testedAt"`
 }
 
 type Proxy struct {

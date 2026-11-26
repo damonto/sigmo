@@ -239,6 +239,8 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.GET("/modems/:id/internet-connections/current", h.Current)
 			protected.GET("/modems/:id/internet-connections/current/traffic", h.Traffic)
 			protected.GET("/modems/:id/internet-connections/public", h.Public)
+			protected.GET("/modems/:id/internet-connections/speed-tests/latest", h.LatestSpeedTest)
+			protected.POST("/modems/:id/internet-connections/speed-tests", h.RunSpeedTest)
 			protected.POST("/modems/:id/internet-connections", h.Connect)
 			protected.PUT("/modems/:id/internet-connections/current/preferences", h.UpdatePreferences)
 			protected.DELETE("/modems/:id/internet-connections/current", h.Disconnect)

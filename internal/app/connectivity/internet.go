@@ -14,6 +14,8 @@ type InternetConnections interface {
 	Current(context.Context, *modem.Modem) (*internet.Connection, error)
 	Traffic(context.Context, *modem.Modem) (internet.TrafficStatus, error)
 	Public(context.Context, *modem.Modem) (internet.PublicIPInfo, error)
+	LatestSpeedTest(context.Context, *modem.Modem) (internet.SpeedTestStatus, error)
+	RunSpeedTest(context.Context, *modem.Modem, string, internet.SpeedTestSize) (internet.SpeedTestStatus, error)
 	Connect(context.Context, *modem.Modem, internet.Preferences) (*internet.Connection, error)
 	UpdatePreferences(context.Context, *modem.Modem, internet.ConnectionPreferences) (*internet.Connection, error)
 	Disconnect(context.Context, *modem.Modem) error
