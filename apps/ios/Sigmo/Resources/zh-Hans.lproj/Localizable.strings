@@ -575,7 +575,7 @@
 "detail.simApplication" = "SIM 应用程序";
 "detail.simApplicationUnavailable" = "SIM 应用不可用";
 "detail.simLocked" = "SIM 已锁定";
-"detail.networkStatus" = "网络状态";
+"detail.networkStatus" = "网络";
 "detail.networkNotRegistered" = "未注册";
 "detail.mobileData" = "移动数据";
 "detail.registeredNetwork" = "注册网络";
@@ -833,7 +833,7 @@
 "connection.wifiProxy.errors.tcp_ip_lookup_failed" = "无法获取 TCP 出口 IP。";
 "connection.wifiProxy.errors.dns_failed" = "通过代理执行 DNS 查询失败。";
 "connection.wifiProxy.errors.timed_out" = "测试超时。";
-"connection.systemNetwork" = "Sigmo 系统网络";
+"connection.systemNetwork" = "系统网络";
 "connection.currentDevice" = "当前设备";
 "connection.uplinkUnavailable" = "未连接或不可用";
 "connection.uplinkHint" = "使用 Sigmo 系统网络，或同一 Sigmo 中设备的互联网连接。更改出口会重新连接 Wi-Fi 通话。";

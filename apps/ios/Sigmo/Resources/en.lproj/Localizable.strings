@@ -575,7 +575,7 @@
 "detail.simApplication" = "SIM Applications";
 "detail.simApplicationUnavailable" = "SIM application is unavailable";
 "detail.simLocked" = "SIM is locked";
-"detail.networkStatus" = "Network status";
+"detail.networkStatus" = "Network";
 "detail.networkNotRegistered" = "Not registered";
 "detail.mobileData" = "Mobile data";
 "detail.registeredNetwork" = "Registered network";
@@ -833,7 +833,7 @@
 "connection.wifiProxy.errors.tcp_ip_lookup_failed" = "Could not retrieve the TCP egress IP.";
 "connection.wifiProxy.errors.dns_failed" = "DNS lookup through the proxy failed.";
 "connection.wifiProxy.errors.timed_out" = "The test timed out.";
-"connection.systemNetwork" = "Sigmo System Network";
+"connection.systemNetwork" = "System";
 "connection.currentDevice" = "This Device";
 "connection.uplinkUnavailable" = "Not connected or unavailable";
 "connection.uplinkHint" = "Use the Sigmo’s system network or an Internet connection from a device on the same Sigmo. Changing this setting reconnects Wi-Fi Calling.";
