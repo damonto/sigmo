@@ -658,11 +658,22 @@ final class ModemDetailFlowTests: XCTestCase {
         screenshot(app, name: "SIM PIN settings")
     }
 
-    func testSIMPINRefreshKeepsProgressInSubmitButton() {
+    func testSIMPINShowsProgressInSwitchAndSubmitButton() {
         let app = launch("detail-physical-pin-loading")
         tapOverviewRow(app.buttons["physicalSIMPIN"], in: app)
         let protection = app.switches["simPINProtection"]
+        let reading = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@ AND enabled == false", "Reading SIM PIN status…"),
+            object: protection
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [reading], timeout: 5), .completed, app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Reading SIM PIN status…"].exists)
+        let readingFrame = protection.frame
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: protection)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed)
         expectToggle(protection, value: "1")
+        XCTAssertEqual(protection.frame.midX, readingFrame.midX, accuracy: 1)
+        XCTAssertEqual(protection.frame.midY, readingFrame.midY, accuracy: 1)
         protection.switches.firstMatch.tap()
         let pin = app.secureTextFields["simPINCurrent"]
         XCTAssertTrue(pin.waitForExistence(timeout: 5))

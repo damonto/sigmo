@@ -9,27 +9,7 @@ struct SIMPINView: View {
 
     var body: some View {
         Form {
-            if state.loading && !state.busy {
-                Section { ProgressView("simPin.loading") }
-            }
-            if let status = state.status {
-                Section {
-                    if status.supported, status.lock == .unlocked, let enabled = status.enabled {
-                        Toggle("simPin.title", isOn: Binding(
-                            get: { enabled },
-                            set: { state.choose($0 ? .enable : .disable) }
-                        ))
-                        .disabled(state.busy || state.loading || state.action != nil)
-                        .accessibilityIdentifier("simPINProtection")
-                        if enabled, state.action == nil {
-                            Button("simPin.actions.change") { state.choose(.change) }
-                                .disabled(state.busy || state.loading)
-                        }
-                    } else {
-                        Text(state.statusMessage)
-                    }
-                }
-            }
+            protectionSection
             if let action = state.action {
                 Section {
                     SecureField(action == .puk ? "simPin.puk" : "simPin.currentPin", text: $state.pin)
@@ -103,6 +83,55 @@ struct SIMPINView: View {
             submission = nil
             focus = nil
             state.leave()
+        }
+    }
+
+    @ViewBuilder private var protectionSection: some View {
+        let readingStatus = state.loading && !state.busy
+        let enabled = protectionEnabled
+        if readingStatus || enabled != nil {
+            Section {
+                protectionToggle(enabled: enabled ?? false, readingStatus: readingStatus)
+                if enabled == true, state.action == nil {
+                    Button("simPin.actions.change") { state.choose(.change) }
+                        .disabled(state.busy || state.loading)
+                }
+            }
+        } else if state.status != nil {
+            Section { Text(state.statusMessage) }
+        }
+    }
+
+    private var protectionEnabled: Bool? {
+        guard let status = state.status, status.supported, status.lock == .unlocked else { return nil }
+        return status.enabled
+    }
+
+    private func protectionToggle(enabled: Bool, readingStatus: Bool) -> some View {
+        let title = Text("simPin.title")
+        return LabeledContent {
+            Toggle(isOn: Binding(
+                get: { enabled },
+                set: { state.choose($0 ? .enable : .disable) }
+            )) {
+                title
+            }
+            .labelsHidden()
+            .fixedSize()
+            .opacity(readingStatus ? 0.5 : 1)
+            .disabled(state.busy || state.loading || state.action != nil)
+            .overlay {
+                if readingStatus {
+                    ProgressView()
+                        .controlSize(.small)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+            .accessibilityValue(Text("simPin.loading"), isEnabled: readingStatus)
+            .accessibilityIdentifier("simPINProtection")
+        } label: {
+            title.accessibilityHidden(true)
         }
     }
 }

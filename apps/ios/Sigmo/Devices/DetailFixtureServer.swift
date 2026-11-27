@@ -253,8 +253,8 @@ actor DetailFixtureServer {
             for session in sessions.values where session.kind == "peer_events" { session.buffer.push(snapshot) }
             return BackendHTTPResponse(data: Data(), status: 204)
         }
-        if scenario == .delayedSIMPIN, request.httpMethod == "GET", request.url?.path.hasSuffix("/sim-pin") == true,
-           requests.contains(where: { $0.httpMethod == "PUT" && $0.url?.path.hasSuffix("/sim-pin/protection") == true }) {
+        if scenario == .delayedSIMPIN, request.httpMethod == "GET", let path = request.url?.path, path.hasSuffix("/sim-pin"),
+           requests.dropLast().contains(where: { $0.httpMethod == "GET" && $0.url?.path == path }) {
             try await Task.sleep(for: .seconds(6))
         }
         if scenario == .delayedSettings, request.httpMethod == "GET", let path = request.url?.path,
