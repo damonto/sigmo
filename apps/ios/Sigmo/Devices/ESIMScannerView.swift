@@ -45,7 +45,7 @@ struct ESIMScannerView: View {
             Button(action: enterManually) {
                 Text("detail.manualInput").fontWeight(.semibold).frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glassProminent).controlSize(.large).buttonBorderShape(.capsule)
+            .glassProminentButtonStyle().controlSize(.large).buttonBorderShape(.capsule)
             .tint(Color(uiColor: .tertiarySystemGroupedBackground)).foregroundStyle(.primary)
             .accessibilityIdentifier("manualESIM")
             .padding(.horizontal, 38).padding(.top, 16).padding(.bottom, 8)

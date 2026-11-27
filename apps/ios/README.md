@@ -4,8 +4,8 @@ A native SwiftUI client for iPhone and iPad, with English and Simplified Chinese
 
 ## Requirements
 
-- iOS 26 or later.
-- For development: a Mac with Xcode supporting the iOS 26 SDK and Swift 6, plus XcodeGen 2.44.1 or later.
+- iOS or iPadOS 18 or later. Liquid Glass and the contacts section index appear on iOS and iPadOS 26 or later.
+- For development: a Mac with Xcode supporting the iOS 27 SDK and Swift 6, plus XcodeGen 2.44.1 or later.
 - A reachable Sigmo backend for normal use; automated tests use local fixtures.
 
 ## Development
@@ -72,7 +72,7 @@ Unplugging the selected reader or SIM stops the session and clears its profiles.
 
 ## Verification
 
-Run **Product → Test** in Xcode with the **Sigmo** scheme to execute `SigmoTests` and `SigmoUITests`. These tests use local fixtures; physical-device, carrier, and APNs checks are separate.
+Run **Product → Test** in Xcode with the **Sigmo** scheme to execute `SigmoTests` and `SigmoUITests`. Use an iOS 18 simulator and an iOS 26 or later simulator to cover both interface variants. These tests use local fixtures; physical-device, carrier, and APNs checks are separate.
 
 From the repository root, check English/Chinese resources and settings fixtures without Xcode or a live backend:
 

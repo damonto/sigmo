@@ -142,7 +142,7 @@ struct ESIMFlowView: View {
         .font(.body.weight(.semibold))
         // Overlay navigation must stay compact when page content uses accessibility sizes.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-        .buttonStyle(.glassProminent).controlSize(.large)
+        .glassProminentButtonStyle().controlSize(.large)
         .tint(Color(uiColor: .tertiarySystemGroupedBackground))
         .foregroundStyle(.primary)
         .padding(.horizontal, 16).padding(.top, 16)
@@ -242,7 +242,7 @@ struct ESIMFlowView: View {
             }) {
                 Text("detail.confirm")
             }
-            .buttonStyle(.glassProminent).controlSize(.large).buttonBorderShape(.capsule)
+            .glassProminentButtonStyle().controlSize(.large).buttonBorderShape(.capsule)
             .disabled(state.confirmation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.sending)
             .padding(.horizontal, 38).padding(.top, 16).padding(.bottom, 8)
             .frame(maxWidth: 560).frame(maxWidth: .infinity)
@@ -252,13 +252,13 @@ struct ESIMFlowView: View {
                     await state.send(.init(type: "user_input", accept: true, response: state.response))
                 }) {
                     Text(detailText(prompt.acceptLabel ?? "detail.confirm"))
-                }.buttonStyle(.glassProminent)
+                }.glassProminentButtonStyle()
                 AsyncActionButton(contentMaxWidth: .infinity, action: {
                     await state.send(.init(type: "user_input", accept: false, response: ""))
                 }) {
                     Text(detailText(prompt.rejectLabel ?? "common.cancel"))
                 }
-                .buttonStyle(.glass)
+                .glassButtonStyle()
             }
             .controlSize(.large).buttonBorderShape(.capsule).disabled(state.sending)
             .padding(.horizontal, 38).padding(.top, 16).padding(.bottom, 8)
@@ -320,7 +320,7 @@ struct ESIMFlowView: View {
                     .padding(.vertical, 16)
             }
             Button { state.connectRemote() } label: { Text("peer.request").frame(maxWidth: .infinity) }
-                .buttonStyle(.glassProminent).controlSize(.large).buttonBorderShape(.capsule)
+                .glassProminentButtonStyle().controlSize(.large).buttonBorderShape(.capsule)
                 .disabled(state.remoteAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityIdentifier("requestPeerTransfer")
         }
@@ -384,7 +384,7 @@ struct ESIMFlowView: View {
             } label: {
                 Text("detail.download").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glassProminent).controlSize(.large).buttonBorderShape(.capsule)
+            .glassProminentButtonStyle().controlSize(.large).buttonBorderShape(.capsule)
             .disabled(selectedDiscovery == nil || state.busy || !state.validSE)
             .accessibilityIdentifier("downloadDiscoveredESIM")
             .padding(.horizontal, 38).padding(.top, 16).padding(.bottom, 8)
@@ -431,15 +431,15 @@ struct ESIMFlowView: View {
                     if state.phase == .preview {
                         AsyncActionButton(id: "confirmESIMPreview", contentMaxWidth: .infinity, action: { await state.send(.init(type: "confirm", accept: true)) }) {
                             Text("detail.confirmDownload")
-                        }.buttonStyle(.glassProminent).disabled(state.sending)
+                        }.glassProminentButtonStyle().disabled(state.sending)
                     } else if state.phase == .completed {
                         Button { dismiss() } label: { Text("common.done").frame(maxWidth: .infinity) }
-                            .buttonStyle(.glassProminent).accessibilityIdentifier("closeESIMFlow")
+                            .glassProminentButtonStyle().accessibilityIdentifier("closeESIMFlow")
                     } else {
                         Button {
                             state.backToForm(); setupPath = []; selectedDiscovery = nil
                         } label: { Text("detail.startAgain").frame(maxWidth: .infinity) }
-                            .buttonStyle(.glassProminent)
+                            .glassProminentButtonStyle()
                     }
                 }
                 .font(.body.weight(.semibold)).controlSize(.large).buttonBorderShape(.capsule)
@@ -502,7 +502,7 @@ struct ESIMFlowView: View {
             Button { state.startTransfer() } label: {
                 Text("detail.setupContinue").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glassProminent).controlSize(.large).buttonBorderShape(.capsule)
+            .glassProminentButtonStyle().controlSize(.large).buttonBorderShape(.capsule)
             .disabled(!state.canTransfer || state.busy)
             .accessibilityIdentifier("startESIMTransfer")
             .padding(.horizontal, 38).padding(.top, 16).padding(.bottom, 8)

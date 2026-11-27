@@ -377,6 +377,8 @@ private struct ModemDetailScreen: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(uiColor: .systemBackground))
         .environment(\.defaultMinListRowHeight, 44)
         .environment(\.horizontalSizeClass, horizontalSizeClass)
         .labelStyle(.titleAndIcon)
@@ -529,7 +531,7 @@ private struct ModemDetailScreen: View {
         .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 44 : 20)
         .padding(.vertical, 10)
         .frame(minHeight: 44)
-        .glassEffect(.regular, in: Capsule())
+        .glassBackground(in: Capsule())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("esimCompactNetworkBar")
         .padding(.horizontal, 16)

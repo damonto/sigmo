@@ -92,14 +92,14 @@ struct ContactActionButtons: View {
     @ScaledMetric(relativeTo: .title3) private var symbolSize: CGFloat = 20
 
     var body: some View {
-        GlassEffectContainer(spacing: 12) {
+        GlassContainer(spacing: 12) {
             HStack(spacing: 16) {
                 shortcut("communication.message", symbol: "message.fill", identifier: messageIdentifier, action: message)
                     .disabled(!canMessage)
                 shortcut("communication.dial", symbol: "phone.fill", identifier: callIdentifier, action: call)
                     .disabled(!canCall)
             }
-            .buttonStyle(.glass).buttonBorderShape(.circle)
+            .glassButtonStyle().buttonBorderShape(.circle)
         }
     }
 
@@ -260,7 +260,7 @@ struct ContactEditView: View {
                                 Text(hasAvatar ? LocalizedStringKey("communication.changePhoto") : LocalizedStringKey("communication.addPhoto"))
                                     .font(.subheadline.weight(.medium)).padding(.horizontal, 8)
                             }
-                            .buttonStyle(.glass).buttonBorderShape(.capsule)
+                            .glassButtonStyle().buttonBorderShape(.capsule)
                             if hasAvatar {
                                 Menu {
                                     if avatar != nil { Button("communication.cropPhoto", systemImage: "crop") { cropping = true } }
@@ -268,7 +268,7 @@ struct ContactEditView: View {
                                         imageLoadID = nil; avatar = nil; photo = nil; removingAvatar = true
                                     }
                                 } label: { Label("communication.photoOptions", systemImage: "ellipsis") }
-                                .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle)
+                                .labelStyle(.iconOnly).glassButtonStyle().buttonBorderShape(.circle)
                             }
                         }
                     }

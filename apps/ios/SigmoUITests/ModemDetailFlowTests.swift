@@ -32,20 +32,22 @@ final class ModemDetailFlowTests: XCTestCase {
         overviewRowCoordinate(element, in: app)?.tap()
     }
     private func overviewRowCoordinate(_ element: XCUIElement, in app: XCUIApplication) -> XCUICoordinate? {
+        let minimumVisibleHeight: CGFloat = 44
         let compactBar = app.descendants(matching: .any)["esimCompactNetworkBar"].firstMatch
         for _ in 0..<12 {
             let frame = app.frame
             let top = (compactBar.exists ? compactBar.frame.maxY : app.navigationBars.firstMatch.frame.maxY) + 8
             let bottom = app.tabBars.firstMatch.frame.minY - 8
             let viewport = CGRect(x: frame.minX, y: top, width: frame.width, height: bottom - top)
-            guard viewport.height >= 44 else {
+            guard viewport.height >= minimumVisibleHeight else {
                 XCTFail("No tappable list area below the network bar")
                 return nil
             }
             let rowFrame = element.waitForExistence(timeout: 1) ? element.frame : .null
             if !rowFrame.isEmpty {
                 let visible = rowFrame.intersection(viewport)
-                if !visible.isNull, visible.height >= 44 {
+                // Compare whole points to account for fractional accessibility frames.
+                if !visible.isNull, visible.height.rounded() >= minimumVisibleHeight {
                     let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: element)
                     XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
                     return app.coordinate(withNormalizedOffset: CGVector(

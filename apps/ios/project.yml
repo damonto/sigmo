@@ -2,7 +2,7 @@ name: Sigmo
 options:
   minimumXcodeGenVersion: 2.44.1
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "18.0"
   developmentLanguage: en
 settings:
   base:

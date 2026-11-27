@@ -109,7 +109,7 @@ struct CallServiceView: View {
                 } label: {
                     Text("calls.sendReply")
                 }
-                .buttonStyle(.glassProminent).disabled(ussd.reply.isEmpty)
+                .glassProminentButtonStyle().disabled(ussd.reply.isEmpty)
                 .accessibilityIdentifier("sendUSSDReply")
             }
             Text("calls.ussdHint").font(.footnote).foregroundStyle(.secondary)
@@ -142,7 +142,7 @@ struct CallKeypad: View {
     var body: some View {
         Group {
             if allowsPlus { keys.buttonStyle(.plain) }
-            else { GlassEffectContainer(spacing: 12) { keys.buttonStyle(.glass).buttonBorderShape(.circle).tint(.primary) } }
+            else { GlassContainer(spacing: 12) { keys.glassButtonStyle().buttonBorderShape(.circle).tint(.primary) } }
         }.frame(maxWidth: 360).frame(maxWidth: .infinity)
     }
 

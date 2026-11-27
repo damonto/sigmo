@@ -47,7 +47,7 @@ struct CommunicationWorkspace: View {
         // Keep the title fixed when pulling down on the list.
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $state.search, placement: .navigationBarDrawer(displayMode: .always), prompt: dynamicTypeSize.isAccessibilitySize ? LocalizedStringKey("home.search") : section.searchPrompt)
-        .searchToolbarBehavior(.minimize)
+        .minimizedSearchToolbar()
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
         .toolbar {
@@ -113,7 +113,7 @@ struct CommunicationWorkspace: View {
             }
         }
         .listStyle(.plain)
-        .listSectionIndexVisibility(session.canAccessDevices && section == .contacts && !state.isEmpty ? .visible : .hidden)
+        .contactIndex(visible: showsContactIndex)
         .contentMargins(.top, 0, for: .scrollContent)
         .overlay {
             if centersEmptyState {
@@ -144,6 +144,17 @@ struct CommunicationWorkspace: View {
         }
     }
 
+    private var showsContactIndex: Bool {
+        guard #available(iOS 26.0, *) else { return false }
+        return session.canAccessDevices && section == .contacts && !state.isEmpty
+    }
+
+    private var contactSections: [ContactIndexSection] {
+        let sections = ContactIndexSection.sections(state.contacts)
+        if showsContactIndex { return sections }
+        return sections.filter { !$0.contacts.isEmpty }
+    }
+
     @ViewBuilder private var rows: some View {
         if section != .contacts {
             filters
@@ -157,7 +168,7 @@ struct CommunicationWorkspace: View {
         }
         switch section {
         case .contacts:
-            ForEach(ContactIndexSection.sections(state.contacts)) { group in
+            ForEach(contactSections) { group in
                 Section {
                     ForEach(group.contacts) { contact in
                         Button { selectedContactID = contact.id } label: {
@@ -177,7 +188,7 @@ struct CommunicationWorkspace: View {
                 } header: {
                     if !group.contacts.isEmpty { Text(group.title).font(.footnote).textCase(nil) }
                 }
-                .sectionIndexLabel(group.title)
+                .contactIndexLabel(group.title)
             }
         case .messages:
             let threads = state.filteredThreads
@@ -297,6 +308,37 @@ struct CommunicationWorkspace: View {
     }
 }
 
+private extension View {
+    @ViewBuilder
+    func minimizedSearchToolbar() -> some View {
+        if #available(iOS 26.0, *) {
+            searchToolbarBehavior(.minimize)
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func contactIndex(visible: Bool) -> some View {
+        if #available(iOS 26.0, *) {
+            listSectionIndexVisibility(visible ? .visible : .hidden)
+        } else {
+            self
+        }
+    }
+}
+
+private extension Section where Parent: View, Content: View, Footer: View {
+    @ViewBuilder
+    func contactIndexLabel(_ title: String) -> some View {
+        if #available(iOS 26.0, *) {
+            sectionIndexLabel(title)
+        } else {
+            self
+        }
+    }
+}
+
 struct CommunicationCallDetail: View {
     let session: BackendSession
     let record: CallRecord
@@ -363,7 +405,7 @@ struct CommunicationThreadView: View {
         .navigationTitle(calls.name(number: thread.participant, session: session))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
-        .safeAreaBar(edge: .bottom, spacing: 0) {
+        .insetBar(edge: .bottom) {
             MessageComposer(text: $composer.text, sending: composer.busy, enabled: composer.selected != nil) {
                 pendingSend = UUID()
             }

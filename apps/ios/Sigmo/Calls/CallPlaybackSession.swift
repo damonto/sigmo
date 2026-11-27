@@ -97,7 +97,7 @@ final class CallPlaybackSession {
                         if active { session.activate(options: [], completionHandler: completion) }
                         else { session.deactivate(options: .notifyOthersOnDeactivation, completionHandler: completion) }
                     } else {
-                        // iOS 26 has only the blocking API. Keep it off the main
+                        // Older iOS versions have only the blocking API. Keep it off the main
                         // actor and Swift's cooperative executor.
                         try session.setActive(active, options: active ? [] : .notifyOthersOnDeactivation)
                         continuation.resume()

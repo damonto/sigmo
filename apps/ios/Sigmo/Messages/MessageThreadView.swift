@@ -40,7 +40,7 @@ struct MessageThreadView: View {
         Group {
             if inline {
                 content
-                    .safeAreaBar(edge: .top, spacing: 0) {
+                    .insetBar(edge: .top) {
                         conversationTitle.padding(.horizontal).padding(.vertical, 8)
                     }
             } else {
@@ -99,7 +99,7 @@ struct MessageThreadView: View {
     private var content: some View {
         timeline
         .background(Color(uiColor: .systemBackground))
-        .safeAreaBar(edge: .bottom, spacing: 0) {
+        .insetBar(edge: .bottom) {
             switch state.replyAvailability {
             case .available:
                 MessageComposer(text: $state.draft, sending: state.sending, enabled: true) {
@@ -203,14 +203,14 @@ struct MessageComposer: View {
     }
 
     var body: some View {
-        GlassEffectContainer(spacing: 8) {
+        GlassContainer(spacing: 8) {
             HStack(alignment: .bottom, spacing: 10) {
                 TextField("messages.textPlaceholder", text: $text, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...6)
                     .padding(.horizontal, 16).padding(.vertical, 12)
                     .frame(minHeight: 44)
-                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 26))
+                    .glassBackground(in: RoundedRectangle(cornerRadius: 26))
                     .disabled(sending)
                     .accessibilityLabel("messages.textPlaceholder")
                     .accessibilityIdentifier("message-input")
@@ -226,7 +226,7 @@ struct MessageComposer: View {
                 .font(.body.weight(.semibold))
                 .frame(minWidth: 20, minHeight: 20)
         }
-        .buttonStyle(.glassProminent)
+        .glassProminentButtonStyle()
         .buttonBorderShape(.circle)
         .controlSize(.large)
         .tint(.green)
@@ -260,7 +260,7 @@ struct NewMessageView: View {
             }
             Spacer()
         }
-        .safeAreaBar(edge: .bottom, spacing: 0) {
+        .insetBar(edge: .bottom) {
             MessageComposer(text: $state.newDraft, sending: state.sending, enabled: !state.newRecipient.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { pendingSend = UUID() }
         }
         .navigationTitle("messages.new").navigationBarTitleDisplayMode(.inline)

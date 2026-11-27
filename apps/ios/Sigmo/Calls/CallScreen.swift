@@ -203,7 +203,7 @@ private struct ActiveCallContent: View {
                 Text(lineDescription(for: incoming))
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
-            GlassEffectContainer(spacing: 12) {
+            GlassContainer(spacing: 12) {
                 HStack(alignment: .top, spacing: 20) {
                     CallControl(label: "calls.decline", symbol: "phone.down.fill", prominentTint: .red, identifier: "calls-decline") {
                         Task { await calls.act(.end(incoming.id)) }
@@ -218,7 +218,7 @@ private struct ActiveCallContent: View {
 
     private var controls: some View {
         VStack(spacing: 24) {
-            GlassEffectContainer(spacing: 20) {
+            GlassContainer(spacing: 20) {
                 HStack(alignment: .top, spacing: 20) {
                     muteControl
                     CallControl(label: "calls.keypad", symbol: "circle.grid.3x3.fill", identifier: "calls-show-keypad") { keypad = true }
@@ -226,7 +226,7 @@ private struct ActiveCallContent: View {
                     audioControl
                 }
             }
-            GlassEffectContainer(spacing: 20) {
+            GlassContainer(spacing: 20) {
                 HStack(alignment: .top, spacing: 20) {
                     holdControl
                     endControl
@@ -258,7 +258,7 @@ private struct ActiveCallContent: View {
             } label: {
                 CallControlIcon(symbol: "speaker.wave.2.fill")
                     .frame(width: CallControlMetrics.size, height: CallControlMetrics.size)
-                    .glassEffect(.regular, in: Circle())
+                    .glassBackground(in: Circle())
             }
             .buttonStyle(.plain)
             .frame(width: CallControlMetrics.size, height: CallControlMetrics.size)
@@ -300,11 +300,11 @@ private struct CallControl: View {
     var body: some View {
         VStack(spacing: 10) {
             if let prominentTint {
-                button.buttonStyle(.glassProminent).tint(prominentTint)
+                button.glassProminentButtonStyle().tint(prominentTint)
             } else if selected {
-                button.buttonStyle(.glassProminent).tint(.white).foregroundStyle(.black)
+                button.glassProminentButtonStyle().tint(.white).foregroundStyle(.black)
             } else {
-                button.buttonStyle(.glass).tint(.primary)
+                button.glassButtonStyle().tint(.primary)
             }
             CallControlCaption(label: label)
         }.frame(maxWidth: .infinity)

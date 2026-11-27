@@ -459,21 +459,21 @@ private struct PeerTransferRequestSheet: View {
                 }) {
                     Text("peer.allowTransfer")
                 }
-                .buttonStyle(.glassProminent)
+                .glassProminentButtonStyle()
                 .disabled(state.sending || selection == nil)
                 AsyncActionButton(id: "rejectPeerTransfer", contentMaxWidth: .infinity, action: {
                     await state.decide(session: session, request: request, accept: false)
                 }) {
                     Text("peer.reject")
                 }
-                .buttonStyle(.glass)
+                .glassButtonStyle()
                 .disabled(state.sending)
             } else {
                 Button { state.dismiss(request.id) } label: {
                     Text(running ? "peer.minimize" : uncertain ? "peer.acknowledge" : "common.done")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glassProminent)
+                .glassProminentButtonStyle()
                 .accessibilityIdentifier("closePeerTransferRequest")
             }
         }

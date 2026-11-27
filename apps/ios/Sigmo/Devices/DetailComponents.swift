@@ -14,7 +14,7 @@ struct ModemOverviewCardSurface: ViewModifier {
     func body(content: Content) -> some View {
         content.background {
             Color.clear
-                .glassEffect(.regular, in: Self.shape)
+                .glassBackground(in: Self.shape)
                 .clipShape(Self.shape)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)

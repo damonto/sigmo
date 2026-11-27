@@ -117,7 +117,7 @@ struct CallRecordingRow: View {
                 }
             }.frame(width: 44, height: 44)
         }
-        .buttonStyle(.glass)
+        .glassButtonStyle()
         .buttonBorderShape(.circle)
         .accessibilityLabel(Text(playbackTitle))
         .accessibilityIdentifier("recording-toggle-\(entry.id)")

@@ -44,7 +44,7 @@ struct HomeDevicesView: View {
                 list
             }
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        .background(Color(uiColor: .systemBackground))
         .detailErrorAlert(store.failure)
         .fullScreenCover(item: demoBinding) { demo in
             DemoView(presentation: demo, liveCalls: calls)
@@ -68,11 +68,13 @@ struct HomeDevicesView: View {
                 }
 
                 VStack(spacing: 16) {
-                    Button("backends.connect", systemImage: "server.rack", action: add)
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.large)
-                        .buttonSizing(.flexible)
-                        .accessibilityIdentifier("connectSigmo")
+                    Button(action: add) {
+                        Label("backends.connect", systemImage: "server.rack")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .glassProminentButtonStyle()
+                    .controlSize(.large)
+                    .accessibilityIdentifier("connectSigmo")
 
                     if demoSession == nil {
                         Button {

@@ -66,7 +66,7 @@ struct CommunicationComposerView: View {
                         Spacer()
                     }
                     .padding(.horizontal, 16).padding(.top, 12)
-                    .safeAreaBar(edge: .bottom, spacing: 0) {
+                    .insetBar(edge: .bottom) {
                         MessageComposer(text: $state.text, sending: state.busy, enabled: state.selected != nil && !state.number.isEmpty) {
                             Task { await submit() }
                         }
