@@ -44,7 +44,7 @@ struct InternetView: View {
             }
         }
         .navigationTitle("connection.internet")
-        .modifier(ConnectionLifecycle(scope: state.scope, titleDisplayMode: .large,
+        .modifier(ConnectionLifecycle(scope: state.scope,
                                       reload: { await state.reload() }, cancelAction: { self.action = nil }))
         .task(id: target) {
             if let target { await traffic.observe(state.scope.detail, target: target) }

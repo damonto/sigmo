@@ -19,7 +19,13 @@ import ContactDetails from '@/components/contacts/ContactDetails.vue'
 import ContactAvatar from '@/components/contacts/ContactAvatar.vue'
 import ContactEditor from '@/components/contacts/ContactEditor.vue'
 import CommunicationComposer from '@/components/communication/CommunicationComposer.vue'
+import BackButton from '@/components/BackButton.vue'
+import ModemStickyTopBar from '@/components/modem/ModemStickyTopBar.vue'
 import { useContactsPage } from '@/composables/useContactsPage'
+import { displayModemName } from '@/composables/useModemDisplay'
+import { useModems } from '@/composables/useModems'
+import { useStickyTopBar } from '@/composables/useStickyTopBar'
+
 const { t } = useI18n()
 const route = useRoute()
 const detailRequested = computed(() => typeof route.params.contactId === 'string')
@@ -39,6 +45,15 @@ const {
   saved,
   remove,
 } = useContactsPage()
+const { getModemById } = useModems()
+const showDeviceContext = computed(() => Boolean(modemId.value) && !desktop.value)
+const modemName = computed(() => {
+  const modem = getModemById(modemId.value)
+  return modem ? displayModemName(modem) : modemId.value
+})
+const backButtonRef = useTemplateRef<HTMLElement>('backButtonRef')
+const { isStickyVisible } = useStickyTopBar(backButtonRef)
+
 const action = ref<'message' | 'call'>()
 const number = ref('')
 const chooseAction = (participant: string, mode: 'message' | 'call') => {
@@ -93,9 +108,27 @@ const restoreListFocus = (event: Event) => {
         ref="contactsList"
         class="flex min-w-0 flex-col gap-4 lg:min-h-0 lg:rounded-xl lg:border lg:bg-card/40 lg:p-4"
       >
+        <template v-if="showDeviceContext">
+          <ModemStickyTopBar
+            :show="isStickyVisible"
+            :title="modemName"
+            :back-label="t('modemDetail.back')"
+            back-to="/"
+          />
+          <div
+            ref="backButtonRef"
+            class="inline-flex self-start"
+            :class="{ invisible: isStickyVisible }"
+          >
+            <BackButton
+              to="/"
+              :label="t('modemDetail.back')"
+            />
+          </div>
+        </template>
         <CommunicationPageHeader
           :title="t('communication.contacts')"
-          :subtitle="t('communication.contactsDescription')"
+          :subtitle="showDeviceContext ? modemName : t('communication.contactsDescription')"
         />
         <Button
           class="w-full gap-2"

@@ -1269,6 +1269,7 @@ const en = {
     settings: {
       title: 'Settings',
       subtitle: 'Update phone number, network, and modem preferences.',
+      backToSettings: 'Back to settings',
       msisdnTitle: 'Phone Number',
       msisdnPlaceholder: 'Enter phone number',
       msisdnSuccess: 'Phone number updated.',

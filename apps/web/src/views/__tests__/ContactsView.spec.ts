@@ -14,6 +14,11 @@ const selected = ref<Contact>()
 const loading = ref(false)
 const desktop = ref(true)
 enableAutoUnmount(afterEach)
+vi.mock('@/composables/useModems', () => ({
+  useModems: () => ({
+    getModemById: (id: string) => (id === 'current' ? { id, name: 'Desk Modem' } : null),
+  }),
+}))
 vi.mock('@/composables/useContactsPage', () => ({
   useContactsPage: () => {
     const route = useRoute()
@@ -47,6 +52,7 @@ const mountPage = async (locale = 'en', path = '/contacts') => {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
+      { path: '/', name: 'home', component: { template: '<main />' } },
       { path: '/contacts', name: 'contacts', component: ContactsView },
       { path: '/contacts/:contactId', name: 'contact', component: ContactsView },
       { path: '/modems/:id/contacts', name: 'modem-contacts', component: ContactsView },
@@ -181,6 +187,21 @@ describe('mobile contact details', () => {
     if (!button) throw new Error(`missing ${name} button`)
     return button
   }
+
+  it('shows the selected device and a link to its list only in device contacts', async () => {
+    desktop.value = false
+    const wrapper = await mountPage('zh', '/modems/current/contacts')
+    expect(wrapper.get('header p').text()).toBe('Desk Modem')
+    expect(wrapper.findAll('a[href="/"]').map((link) => link.text())).toEqual([
+      '← 返回列表',
+      '← 返回列表',
+    ])
+
+    await wrapper.vm.$router.push('/contacts')
+    expect(wrapper.get('header p').text()).toBe(zh.communication.contactsDescription)
+    expect(wrapper.find('a[href="/"]').exists()).toBe(false)
+  })
+
   it.each(['/contacts/contact', '/modems/current/contacts/contact'])(
     'opens a direct contact link in a dialog and closes to its list: %s',
     async (path) => {

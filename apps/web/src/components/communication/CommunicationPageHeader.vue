@@ -8,7 +8,7 @@ defineProps<{ title: string; subtitle?: string }>()
       <h1 class="text-2xl font-semibold text-foreground">{{ title }}</h1>
       <p
         v-if="subtitle"
-        class="text-sm text-muted-foreground"
+        class="text-sm wrap-anywhere text-muted-foreground"
       >
         {{ subtitle }}
       </p>

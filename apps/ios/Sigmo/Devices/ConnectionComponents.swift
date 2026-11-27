@@ -49,7 +49,6 @@ struct ConnectionAction<Value>: Identifiable {
 struct ConnectionLifecycle: ViewModifier {
     let scope: ProfileConnectionScope
     var refreshID = 0
-    var titleDisplayMode: NavigationBarItem.TitleDisplayMode = .inline
     let reload: @MainActor () async -> Void
     let cancelAction: @MainActor () -> Void
     var observe: (@MainActor () async -> Void)? = nil
@@ -68,7 +67,8 @@ struct ConnectionLifecycle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.defaultMinListRowHeight, 44)
-            .navigationBarTitleDisplayMode(titleDisplayMode)
+            .contentMargins(.top, 8, for: .scrollContent)
+            .navigationBarTitleDisplayMode(.inline)
             .disabled(!scope.available)
             .foregroundTask(id: Identity(available: scope.available, refresh: refreshID)) {
                 guard scope.available else { return }

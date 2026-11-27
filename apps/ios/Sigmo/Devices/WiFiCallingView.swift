@@ -23,7 +23,7 @@ struct WiFiCallingView: View {
     var body: some View {
         form
             .navigationTitle("capability.wifiCalling")
-            .modifier(ConnectionLifecycle(scope: state.scope, refreshID: refreshID, titleDisplayMode: .large,
+            .modifier(ConnectionLifecycle(scope: state.scope, refreshID: refreshID,
                                           reload: { await state.reload() }, cancelAction: {
                 action = nil
                 confirmEnable = false

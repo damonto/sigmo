@@ -163,6 +163,7 @@ struct ESIMProfileActionsView: View {
             }
         }
         .environment(\.defaultMinListRowHeight, 44)
+        .contentMargins(.top, 8, for: .scrollContent)
         .disabled(busy)
         .navigationTitle(profile?.name ?? detailText("detail.profileActions"))
         .navigationBarTitleDisplayMode(.inline)

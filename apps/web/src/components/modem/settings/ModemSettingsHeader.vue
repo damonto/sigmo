@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useTemplateRef } from 'vue'
+import { computed, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import BackButton from '@/components/BackButton.vue'
@@ -29,7 +29,13 @@ const { isStickyVisible } = useStickyTopBar(backButtonRef)
 
 const title = props.title || t('modemDetail.settings.title')
 const subtitle = props.subtitle || t('modemDetail.settings.subtitle')
-const backLabel = props.backLabel || t('modemDetail.back')
+const backLabel = computed(() => {
+  if (props.backLabel) return props.backLabel
+  if (typeof props.backTo !== 'string' && props.backTo.name === 'modem-settings') {
+    return t('modemDetail.settings.backToSettings')
+  }
+  return t('modemDetail.back')
+})
 </script>
 
 <template>

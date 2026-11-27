@@ -42,7 +42,7 @@ struct VoLTEView: View {
             }
         }
         .navigationTitle("capability.volte")
-        .modifier(ConnectionLifecycle(scope: state.scope, titleDisplayMode: .large,
+        .modifier(ConnectionLifecycle(scope: state.scope,
                                       reload: { await state.reload() }, cancelAction: { action = nil },
                                       observe: { await state.observePending() }))
         .task(id: action?.id) { [action] in

@@ -1231,6 +1231,7 @@ const zh = {
     settings: {
       title: '设置',
       subtitle: '更新 手机号码、网络和模块偏好设置。',
+      backToSettings: '返回设置',
       msisdnTitle: '手机号码',
       msisdnPlaceholder: '输入手机号',
       msisdnSuccess: '手机号已更新。',
