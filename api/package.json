@@ -18,7 +18,7 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.9.0",
     "@types/node": "^26.6.6",
-    "oxlint": "^1.94.0",
+    "oxlint": "^1.95.0",
     "oxlint-tsgolint": "^7.0.2008",
     "prettier": "~3.10.1",
     "typescript": "~7.0.2",
