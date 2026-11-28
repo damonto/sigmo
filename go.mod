@@ -16,7 +16,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.4.6
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/ncruces/go-sqlite3 v0.37.0
+	github.com/ncruces/go-sqlite3 v0.38.0
 	github.com/nyaruka/phonenumbers v1.8.1
 	github.com/pion/interceptor v0.1.51
 	github.com/pion/opus v0.1.1-0.20261026214112-e7b8aa55508c
