@@ -23,7 +23,7 @@
     "prettier": "~3.10.1",
     "typescript": "~7.0.2",
     "vitest": "^5.1.1",
-    "wrangler": "^4.166.0"
+    "wrangler": "^4.168.0"
   },
   "dependencies": {
     "@resvg/resvg-wasm": "2.6.2",
