@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "@resvg/resvg-wasm": "2.6.2",
-    "hono": "^4.13.20",
+    "hono": "^4.13.22",
     "jose": "6.2.17"
   }
 }
